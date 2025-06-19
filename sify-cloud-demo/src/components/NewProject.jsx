@@ -20,13 +20,13 @@ import {
 
 const NewProject = () => {
   const [formData, setFormData] = useState({
-    customerName: 'Edgecut Technologies Ltd',
+    customerName: 'Acme Technologies',
     projectName: 'Web Application Infrastructure',
-    contactEmail: 'gomathi.s@edgecut.com',
+    contactEmail: 'suresh@acme.com',
     phone: '+91 9876543210',
     projectType: 'New Infrastructure',
     timeline: 'Normal (2-4 weeks)',
-    requirementsSource: 'Excel Upload (Recommended)',
+    requirementsSource: 'Upload Template',
     contractTerm: CONTRACT_TERMS.ANNUAL,
     flowType: FLOW_TYPES.STANDARD
   })
@@ -99,13 +99,22 @@ const NewProject = () => {
         status: PROJECT_STATUS.DRAFT
       })
       
-      // Navigate to Excel upload with project data
-      navigate('/excel-upload', { 
-        state: { 
-          projectData: newProject,
-          projectId: newProject.id
-        } 
-      })
+      if (formData.requirementsSource === 'Interactive Entry') {
+        navigate('/manual-entry', {
+          state: {
+            projectData: newProject,
+            projectId: newProject.id
+          }
+        })
+      } else {
+        // Navigate to Excel upload with project data
+        navigate('/excel-upload', { 
+          state: { 
+            projectData: newProject,
+            projectId: newProject.id
+          } 
+        })
+      }
     } catch (error) {
       console.error('Error creating project:', error)
       setErrors({ submit: 'Failed to create project. Please try again.' })
@@ -329,12 +338,12 @@ const NewProject = () => {
                   className="flex flex-wrap gap-6"
                 >
                   <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="Excel Upload (Recommended)" id="excel" />
-                    <Label htmlFor="excel">Excel Upload (Recommended)</Label>
+                    <RadioGroupItem value="Upload Template" id="excel" />
+                    <Label htmlFor="excel">Upload Template</Label>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="Manual Entry (Coming Soon)" id="manual" disabled />
-                    <Label htmlFor="manual" className="text-gray-400">Manual Entry (Coming Soon)</Label>
+                    <RadioGroupItem value="Interactive Entry" id="manual" />
+                    <Label htmlFor="manual">Interactive Entry</Label>
                   </div>
                 </RadioGroup>
               </div>

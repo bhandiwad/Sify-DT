@@ -218,10 +218,25 @@ const ExcelUpload = () => {
       await new Promise(resolve => setTimeout(resolve, 1000))
 
       // Update project with match results
+      const customBoqItems = finalResults.unmatched.map(item => ({
+        ...item,
+        sku: 'CI-CUSTOM',
+        category: 'CUSTOM',
+        unitPrice: 5000,
+        totalPrice: 5000 * (item.quantity || 1),
+      }));
       const updatedProject = updateProject(projectData.id, {
         matchedItems: finalResults.matched,
         unmatchedItems: finalResults.unmatched,
         essentialServices: finalResults.matched.filter(item => item.essential),
+        boqItems: [
+          ...finalResults.matched.map(item => ({
+            ...item,
+            unitPrice: item.matchedSKU?.basePrice || 0,
+            totalPrice: (item.matchedSKU?.basePrice || 0) * (item.quantity || 1)
+          })),
+          ...customBoqItems
+        ],
         flowType: finalResults.unmatched.length > 0 ? FLOW_TYPES.CUSTOM : FLOW_TYPES.STANDARD,
         status: getNextStatus(PROJECT_STATUS.DRAFT, finalResults.unmatched.length > 0 ? FLOW_TYPES.CUSTOM : FLOW_TYPES.STANDARD)
       })
@@ -231,23 +246,14 @@ const ExcelUpload = () => {
       // Auto-navigate based on results and workflow
       setTimeout(() => {
         try {
-          if (finalResults.unmatched.length > 0) {
-            // Has custom SKUs - go to Solution Architect first (new workflow)
-            navigate('/solution-architect-vetting', { 
-              state: { 
-                projectId: updatedProject.id,
-                matchResults: finalResults
-              } 
-            })
-          } else {
-            // All standard - continue to regular BoQ
-            navigate('/boq-generated', { 
-              state: { 
-                projectId: updatedProject.id,
-                matchResults: finalResults
-              } 
-            })
+          const navigationState = {
+            ...updatedProject,
+            projectId: updatedProject.id,
+            matchResults: finalResults,
+            currentPersona: getCurrentPersona()
           }
+          // Always go to BoQ Generated for AM review first
+          navigate('/boq-generated', { state: navigationState })
         } catch (navError) {
           console.error('Navigation error:', navError)
           setError('Navigation failed. Please try again.')

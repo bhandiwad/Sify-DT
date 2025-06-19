@@ -1,5 +1,7 @@
 import React, { useState } from 'react'
-import { CATALOG, VM_OS_OPTIONS, VM_FEATURES, FLOOR_UNIT_PRICES } from './BoQGenerated'
+import { CATALOG, VM_OS_OPTIONS, VM_FEATURES, FLOOR_UNIT_PRICES } from '../utils/constants'
+import { Tooltip } from './ui/tooltip'
+import { SERVICE_CATEGORIES } from '../utils/serviceModel'
 
 // Helper functions from BoQGenerated
 function extractVMConfig(description) {
@@ -28,21 +30,59 @@ function getShortFeatureCode(feature) {
   return feature.slice(0, 3).toUpperCase();
 }
 function getInternalCode(item) {
-  if (item.category === 'Compute' && item.vmConfig) {
-    const { vcpu, ram, storage, os, features } = item.vmConfig
-    const osTag = os ? `-${getShortOsCode(os)}` : ''
-    const featTag = features && features.length ? '-' + features.map(getShortFeatureCode).join('') : ''
-    return `CI-${vcpu}C${ram}R${storage}S${osTag}${featTag}`
+  // Compute
+  if ((item.category === 'Compute' || item.category === 'COMPUTE') && item.vmConfig) {
+    const { vcpu, ram, storage, os, features } = item.vmConfig;
+    const osTag = os ? `-${getShortOsCode(os)}` : '';
+    const featTag = features && features.length ? '-' + features.map(getShortFeatureCode).join('') : '';
+    return `CI-${vcpu}C${ram}R${storage}S${osTag}${featTag}`;
   }
-  if (item.category === 'Storage' && item.storageConfig) {
-    const { size, iops, type } = item.storageConfig
-    return `ST-${size}G-${type?.toUpperCase() || 'SSD'}-I${iops >= 1000 ? Math.round(iops/1000)+'K' : iops}`
+  // Network
+  if ((item.category === 'Network' || item.category === 'NETWORK') && (item.networkConfig || item.description)) {
+    let bandwidth = item.networkConfig?.bandwidth;
+    if (!bandwidth && item.description) {
+      const match = item.description.match(/(\d+)\s*Mbps/i);
+      bandwidth = match ? match[1] : '100';
+    }
+    let code = `CI-NW-${bandwidth}M`;
+    const staticIp = item.networkConfig?.staticIp || /static ip/i.test(item.description || '');
+    const firewall = item.networkConfig?.firewall || /firewall/i.test(item.description || '');
+    if (staticIp) code += '-SIP';
+    if (firewall) code += '-FW';
+    if (/vpn/i.test(item.description || '')) code = 'CI-VPN-S2S';
+    return code;
   }
-  if (item.category === 'Network' && item.networkConfig) {
-    const { bandwidth, staticIp, firewall } = item.networkConfig
-    return `NW-${bandwidth}M${staticIp ? '-SIP' : ''}${firewall ? '-FW' : ''}`
+  // Security
+  if ((item.category === 'Security' || item.category === 'SECURITY')) {
+    if (item.description && /firewall/i.test(item.description)) return 'CI-SEC-FW';
+    return 'CI-SEC';
   }
-  return item.internalCode
+  // Backup
+  if ((item.category === 'Backup' || item.category === 'BACKUP')) {
+    if (item.description && /standard/i.test(item.description)) return 'CI-BKP-STD';
+    return 'CI-BKP';
+  }
+  // Storage
+  if ((item.category === 'Storage' || item.category === 'STORAGE') && (item.storageConfig || item.description)) {
+    let size = item.storageConfig?.size;
+    let type = item.storageConfig?.type;
+    if ((!size || !type) && item.description) {
+      const match = item.description.match(/(\d+)\s*GB/i);
+      size = match ? match[1] : '100';
+      type = /ssd/i.test(item.description) ? 'S' : 'H';
+    }
+    return `CI-ST-${size}G-${type}`;
+  }
+  // Custom
+  if ((item.category === 'Custom' || item.category === 'CUSTOM')) {
+    if (item.description && /vdi/i.test(item.description)) {
+      const match = item.description.match(/(\d+)/);
+      return `CI-CUSTOM-VDI${match ? match[1] : ''}U`;
+    }
+    return 'CI-CUSTOM';
+  }
+  // Fallback
+  return `CI-${item.category?.toUpperCase() || 'GEN'}-${item.sku || ''}`;
 }
 function getVmDescription(vmConfig) {
   if (!vmConfig) return '';
@@ -59,845 +99,505 @@ function getNetworkDescription(networkConfig) {
   return `Network - ${networkConfig.bandwidth}Mbps${networkConfig.staticIp ? ', Static IP' : ''}${networkConfig.firewall ? ', Firewall' : ''}`;
 }
 
+// Helper to generate logical internal code for custom items
+function getCustomInternalCode(item) {
+  const label = (item.name || item.label || item.description || '').toLowerCase();
+  if (label.includes('vdi')) return `CI-CUSTOM-VDI-${item.quantity || 1}U`;
+  if (label.includes('ai') || label.includes('ml') || label.includes('gpu')) return 'CI-CUSTOM-AIML-GPU';
+  if (label.includes('kubernetes')) return 'CI-CUSTOM-K8S';
+  if (label.includes('backup')) return 'CI-CUSTOM-BKP';
+  if (label.includes('firewall')) return 'CI-CUSTOM-FW';
+  return `CI-CUSTOM-${label.replace(/\s+/g, '').slice(0,8).toUpperCase()}`;
+}
+
+const ENV_OPTIONS = [
+  { value: 'PROD', label: 'Production' },
+  { value: 'DEV', label: 'Development' },
+  { value: 'UAT', label: 'UAT' },
+  { value: 'STAGE', label: 'Staging' },
+];
+
+// 1. Add a helper to get default SKU for a category
+export const DEFAULT_SKU = {
+  'COMPUTE': 'CI-COMPUTE',
+  'STORAGE': 'CI-STORAGE',
+  'PAAS': 'CI-PAAS',
+  'NETWORK': 'CI-NETWORK',
+  'SECURITY': 'CI-SECURITY',
+  'BACKUP': 'CI-BACKUP',
+  'DR-TOOL': 'CI-DR-TOOL',
+  'MANAGED-SERVICES': 'CI-MANAGED-OS',
+  'CUSTOM': 'CI-CUSTOM',
+};
+
+// Helper: Parse description for Compute (VM)
+function parseVmFromDescription(description) {
+  const vcpuMatch = description.match(/(\d+)\s*vCPU/i);
+  const ramMatch = description.match(/(\d+)\s*GB/i);
+  const storageMatch = description.match(/(\d+)\s*GB.*SSD|HDD/i);
+  return {
+    vcpu: vcpuMatch ? parseInt(vcpuMatch[1]) : 2,
+    ram: ramMatch ? parseInt(ramMatch[1]) : 4,
+    storage: storageMatch ? parseInt(storageMatch[1]) : 50,
+    os: /windows/i.test(description) ? 'windows-2022' : /linux|ubuntu|rhel/i.test(description) ? 'ubuntu' : 'windows-2022',
+    features: []
+  };
+}
+// Helper: Parse description for Storage
+function parseStorageFromDescription(description) {
+  const sizeMatch = description.match(/(\d+)\s*GB/i);
+  const type = /ssd/i.test(description) ? 'SSD' : /hdd/i.test(description) ? 'HDD' : 'SSD';
+  return {
+    size: sizeMatch ? parseInt(sizeMatch[1]) : 100,
+    type
+  };
+}
+// Helper: Parse description for Network
+function parseNetworkFromDescription(description) {
+  const bandwidthMatch = description.match(/(\d+)\s*Mbps/i);
+  return {
+    bandwidth: bandwidthMatch ? parseInt(bandwidthMatch[1]) : 100
+  };
+}
+// Helper: Find best matching SKU from catalog
+function findSkuFromDescription(description, category) {
+  const lowerDesc = description.toLowerCase();
+  const candidates = CATALOG.filter(c => c.category === category);
+  let best = candidates.find(c => lowerDesc.includes((c.label || '').toLowerCase()));
+  if (!best && candidates.length > 0) best = candidates[0];
+  return best ? best.sku : DEFAULT_SKU[category] || 'CI-COMPUTE';
+}
+// Helper: Get floor price for ask price validation
+function getFloorPriceForItem(item) {
+  if ((item.category === 'Compute' || item.category === 'COMPUTE') && item.vmConfig) {
+    return item.vmConfig.vcpu * FLOOR_UNIT_PRICES.vcpu +
+      item.vmConfig.ram * FLOOR_UNIT_PRICES.ram +
+      item.vmConfig.storage * FLOOR_UNIT_PRICES.storage +
+      (VM_OS_OPTIONS.find(o => o.value === item.vmConfig.os)?.price || 0) +
+      (item.vmConfig.features?.reduce((sum, f) => sum + (VM_FEATURES.find(x => x.value === f)?.price || 0), 0) || 0);
+  } else if ((item.category === 'Storage' || item.category === 'STORAGE') && item.storageConfig) {
+    return item.storageConfig.size * FLOOR_UNIT_PRICES.storage;
+  } else if ((item.category === 'Network' || item.category === 'NETWORK')) {
+    return FLOOR_UNIT_PRICES.network;
+  } else if (FLOOR_UNIT_PRICES[item.sku]) {
+    return FLOOR_UNIT_PRICES[item.sku];
+  }
+  return item.unitPrice || 0;
+}
+
+// Helper: Get configOptions for a given category and SKU
+function getConfigOptions(category, sku) {
+  // Normalize category for lookup
+  const normalizedCategory = (category || '').toUpperCase();
+  const catKey = Object.keys(SERVICE_CATEGORIES).find(
+    k => k.toUpperCase() === normalizedCategory
+  );
+  if (!catKey) {
+    return {};
+  }
+  // Direct SKU lookup only
+  let service = SERVICE_CATEGORIES[catKey].services.find(s => (s.sku || '').toLowerCase() === (sku || '').toLowerCase());
+  if (!service) {
+    return {};
+  }
+  return service.configOptions || {};
+}
+
+// Helper: Get default value for a config option
+function getDefaultConfigValue(opt) {
+  if (Array.isArray(opt)) return opt[0];
+  if (typeof opt === 'object' && opt.min !== undefined) return opt.min;
+  return '';
+}
+
+// Helper: Populate config fields for add/edit
+function populateConfigFields(category, sku, description, existingConfig = {}) {
+  const configOptions = getConfigOptions(category, sku);
+  const config = {};
+  Object.entries(configOptions).forEach(([key, opt]) => {
+    if (existingConfig[key] !== undefined) {
+      config[key] = existingConfig[key];
+    } else if (description) {
+      // Try to parse from description for common fields
+      if (key === 'cpu' || key === 'vcpu') {
+        const match = description.match(/(\d+)\s*vCPU/i);
+        config[key] = match ? parseInt(match[1]) : getDefaultConfigValue(opt);
+      } else if (key === 'ram') {
+        const match = description.match(/(\d+)\s*GB/i);
+        config[key] = match ? parseInt(match[1]) : getDefaultConfigValue(opt);
+      } else if (key === 'storage' || key === 'size') {
+        const match = description.match(/(\d+)\s*GB/i);
+        config[key] = match ? parseInt(match[1]) : getDefaultConfigValue(opt);
+      } else if (Array.isArray(opt)) {
+        config[key] = opt[0];
+      } else if (typeof opt === 'object' && opt.min !== undefined) {
+        config[key] = opt.min;
+      } else {
+        config[key] = '';
+      }
+    } else {
+      config[key] = getDefaultConfigValue(opt);
+    }
+  });
+  return config;
+}
+
+// In the edit form rendering, dynamically render fields for the selected category/SKU
+function renderConfigFields(category, sku, config, handleConfigChange) {
+  const configOptions = getConfigOptions(category, sku);
+  if (!configOptions || Object.keys(configOptions).length === 0) {
+    return (
+      <div style={{ color: '#b91c1c', background: '#fef2f2', padding: '1rem', borderRadius: 6, marginBottom: 16 }}>
+        <strong>No editable options available for this resource.</strong><br />
+        Please check that the SKU and category are correct and match the service catalog.
+      </div>
+    );
+  }
+  return (
+    <div className="grid grid-cols-2 gap-4 mb-4">
+      {Object.entries(configOptions).map(([key, opt]) => (
+        <div key={key}>
+          <label className="block font-medium mb-1">{key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</label>
+          {Array.isArray(opt) ? (
+            <select value={config[key]} onChange={e => handleConfigChange(key, e.target.value)} className="w-full border rounded px-2 py-1">
+              {opt.map(val => <option key={val} value={val}>{val}</option>)}
+            </select>
+          ) : typeof opt === 'object' && opt.min !== undefined ? (
+            <input type="number" min={opt.min} max={opt.max} value={config[key]} onChange={e => handleConfigChange(key, parseInt(e.target.value))} className="w-full border rounded px-2 py-1" />
+          ) : (
+            <input type="text" value={config[key]} onChange={e => handleConfigChange(key, e.target.value)} className="w-full border rounded px-2 py-1" />
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Helper function to normalize SKU
+function normalizeSkuFormat(sku, category) {
+  // Always use the simple category-based SKU
+  return DEFAULT_SKU[category] || DEFAULT_SKU['COMPUTE'];
+}
+
+// Helper function to normalize category
+function normalizeCategory(category) {
+  return (category || 'COMPUTE').toUpperCase();
+}
+
+// Helper function to create a normalized item
+function createNormalizedItem(values) {
+  const category = normalizeCategory(values.category);
+  const sku = normalizeSkuFormat(values.sku, category);
+  
+  // Start with basic normalized values
+  const normalized = {
+    ...values,
+    category,
+    sku,
+    quantity: parseInt(values.quantity) || 1,
+    unitPrice: parseInt(values.unitPrice) || 0,
+    askPrice: parseInt(values.askPrice) || parseInt(values.unitPrice) || 0,
+  };
+
+  // Generate the internal code based on configuration
+  normalized.internalCode = getInternalCode(normalized);
+  
+  // Calculate total price
+  normalized.totalPrice = normalized.unitPrice * normalized.quantity;
+
+  return normalized;
+}
+
 // Accept props: items, setItems, editable, highlightNew, etc.
-const BoQTable = ({ items, setItems, editable, highlightNew, onAddResource, onEditResource, allowCustomSKU = true, onApprovalStatusChange }) => {
+const BoQTable = ({ items, setItems, editable, highlightNew, onAddResource, onEditResource, allowCustomSKU = true, restrictEditToStandardSkus = false, restrictEditToCustomSkus = false, onApprovalStatusChange, persona, workflow }) => {
   const [editingIndex, setEditingIndex] = useState(null)
   const [editValues, setEditValues] = useState({})
   const [adding, setAdding] = useState(false)
-  const [addValues, setAddValues] = useState({ sku: '', quantity: 1, unitPrice: '', description: '', custom: false })
+  const [addValues, setAddValues] = useState({ 
+    sku: DEFAULT_SKU['COMPUTE'],
+    quantity: 1,
+    unitPrice: '',
+    askPrice: '',
+    description: '',
+    custom: false,
+    category: 'COMPUTE',
+    env: 'PROD'
+  })
   const [expandedIndex, setExpandedIndex] = useState(null)
+  const [configState, setConfigState] = useState({});
 
   // Handle edit
   const startEdit = (idx) => {
     const item = items[idx];
-    // Compute missing fields
-    let computed = { ...item };
-    // Compute internal code
-    computed.internalCode = getInternalCode(item);
-    // Compute description
-    if (item.category === 'Compute' && item.vmConfig) computed.description = getVmDescription(item.vmConfig);
-    if (item.category === 'Storage' && item.storageConfig) computed.description = getStorageDescription(item.storageConfig);
-    if (item.category === 'Network' && item.networkConfig) computed.description = getNetworkDescription(item.networkConfig);
-    // Compute unit price
-    if (!item.unitPrice || item.unitPrice === 0) {
-      if (item.category === 'Compute' && item.vmConfig) {
-        computed.unitPrice = item.vmConfig.vcpu * FLOOR_UNIT_PRICES.vcpu + item.vmConfig.ram * FLOOR_UNIT_PRICES.ram + item.vmConfig.storage * FLOOR_UNIT_PRICES.storage + (VM_OS_OPTIONS.find(o => o.value === item.vmConfig.os)?.price || 0) + (item.vmConfig.features?.reduce((sum, f) => sum + (VM_FEATURES.find(x => x.value === f)?.price || 0), 0) || 0);
-      } else if (item.category === 'Storage' && item.storageConfig) {
-        computed.unitPrice = item.storageConfig.size * FLOOR_UNIT_PRICES.storage;
-      } else if (item.category === 'Network') {
-        computed.unitPrice = FLOOR_UNIT_PRICES.network;
-      } else {
-        computed.unitPrice = 5000;
-      }
+    // Create a normalized version of the item
+    const normalizedItem = createNormalizedItem(item);
+    
+    // Set up config state
+    let initialConfig = {};
+    if (normalizedItem.category === 'COMPUTE' && normalizedItem.vmConfig) {
+      initialConfig = { ...normalizedItem.vmConfig };
+    } else if (normalizedItem.category === 'STORAGE' && normalizedItem.storageConfig) {
+      initialConfig = { ...normalizedItem.storageConfig };
+    } else if (normalizedItem.category === 'NETWORK' && normalizedItem.networkConfig) {
+      initialConfig = { ...normalizedItem.networkConfig };
+    } else if (normalizedItem.category === 'SECURITY' && normalizedItem.securityConfig) {
+      initialConfig = { ...normalizedItem.securityConfig };
+    } else if (normalizedItem.config) {
+      initialConfig = { ...normalizedItem.config };
     }
+
+    const config = populateConfigFields(
+      normalizedItem.category,
+      normalizedItem.sku,
+      normalizedItem.description,
+      initialConfig
+    );
+
     setEditingIndex(idx);
-    setEditValues({ ...computed, custom: !CATALOG.some(c => c.sku === item.sku) });
+    setExpandedIndex(idx);
+    setEditValues({ 
+      ...normalizedItem,
+      custom: !CATALOG.some(c => c.sku === normalizedItem.sku)
+    });
+    setConfigState(config);
   };
 
   const handleEditChange = (field, value) => {
-    setEditValues(prev => ({ ...prev, [field]: value }))
-    if (field === 'sku') {
-      const cat = CATALOG.find(c => c.sku === value)
-      if (cat) {
-        setEditValues(prev => ({
-          ...prev,
-          custom: false,
-          unitPrice: cat.unitPrice,
-          description: cat.label,
-          category: cat.category,
-          internalCode: cat.internalCode
-        }))
-      } else {
-        setEditValues(prev => ({ ...prev, custom: true }))
+    setEditValues(prev => {
+      let next = { ...prev, [field]: value };
+      
+      // Always normalize category and SKU
+      next.category = normalizeCategory(next.category);
+      next.sku = normalizeSkuFormat(next.sku, next.category);
+
+      if (["category", "sku", "description"].includes(field)) {
+        // Get initial config based on current state
+        let initialConfig = {};
+        if (next.category === 'COMPUTE' && next.vmConfig) initialConfig = { ...next.vmConfig };
+        else if (next.category === 'STORAGE' && next.storageConfig) initialConfig = { ...next.storageConfig };
+        else if (next.category === 'NETWORK' && next.networkConfig) initialConfig = { ...next.networkConfig };
+        else if (next.category === 'SECURITY' && next.securityConfig) initialConfig = { ...next.securityConfig };
+        else if (next.config) initialConfig = { ...next.config };
+
+        const config = populateConfigFields(
+          next.category,
+          next.sku,
+          field === "description" ? value : next.description,
+          initialConfig
+        );
+        
+        setConfigState(config);
+        next.config = config;
       }
-    }
-  }
+
+      return next;
+    });
+  };
+
   const saveEdit = (idx) => {
-    const updated = [...items];
-    let item = { ...editValues };
-    // Always recompute fields
-    if (item.category === 'Compute' && item.vmConfig) {
-      item.internalCode = getInternalCode(item);
-      item.description = getVmDescription(item.vmConfig);
-      if (!item.unitPrice || item.unitPrice === 0) {
-        item.unitPrice = item.vmConfig.vcpu * FLOOR_UNIT_PRICES.vcpu + item.vmConfig.ram * FLOOR_UNIT_PRICES.ram + item.vmConfig.storage * FLOOR_UNIT_PRICES.storage + (VM_OS_OPTIONS.find(o => o.value === item.vmConfig.os)?.price || 0) + (item.vmConfig.features?.reduce((sum, f) => sum + (VM_FEATURES.find(x => x.value === f)?.price || 0), 0) || 0);
-      }
-    } else if (item.category === 'Storage' && item.storageConfig) {
-      item.internalCode = getInternalCode(item);
-      item.description = getStorageDescription(item.storageConfig);
-      if (!item.unitPrice || item.unitPrice === 0) {
-        item.unitPrice = item.storageConfig.size * FLOOR_UNIT_PRICES.storage;
-      }
-    } else if (item.category === 'Network' && item.networkConfig) {
-      item.internalCode = getInternalCode(item);
-      item.description = getNetworkDescription(item.networkConfig);
-      if (!item.unitPrice || item.unitPrice === 0) {
-        item.unitPrice = FLOOR_UNIT_PRICES.network;
-      }
-    } else if (item.category === 'Custom') {
-      // Ensure customConfig is saved
-      item.customConfig = editValues.customConfig || {};
-      // Use custom logic for internal code/description
-      const label = item.name || item.label || item.description || '';
-      const lowerLabel = label.toLowerCase();
-      const isVDI = lowerLabel.includes('vdi');
-      const isStorage = lowerLabel.includes('storage');
-      const isNetwork = lowerLabel.includes('network') || lowerLabel.includes('vpn');
-      const isFirewall = lowerLabel.includes('firewall') || lowerLabel.includes('security');
-      const isBackup = lowerLabel.includes('backup') || lowerLabel.includes('dr');
-      const config = item.customConfig || {};
-      function getCustomDescription(label, config) {
-        if (isVDI) return `VDI - ${config.oem || ''} - ${config.users || ''} users, ${config.vcpu || ''} vCPU, ${config.ram || ''}GB RAM, ${config.storage || ''}GB, ${config.os || ''}`;
-        if (isStorage) return `Storage - ${config.oem || ''} - ${config.size || ''}GB ${config.type || ''}, ${config.iops || ''} IOPS`;
-        if (isNetwork) return `Network - ${config.oem || ''} - ${config.bandwidth || ''}Mbps, ${config.connections || ''} connections`;
-        if (isFirewall) return `Firewall - ${config.oem || ''} - ${config.ruleSet || ''}, ${config.throughput || ''}Mbps`;
-        if (isBackup) return `Backup - ${config.oem || ''} - ${config.frequency || ''}, ${config.retention || ''}d`;
-        return label;
-      }
-      function getCustomInternalCode(label, config) {
-        if (isVDI) return `VDI-${(config.oem || '').slice(0,3).toUpperCase()}-${config.users || ''}U`;
-        if (isStorage) return `CST-ST-${(config.oem || '').slice(0,3).toUpperCase()}-${config.size || ''}G`;
-        if (isNetwork) return `CST-NW-${(config.oem || '').slice(0,3).toUpperCase()}-${config.bandwidth || ''}M`;
-        if (isFirewall) return `CST-FW-${(config.oem || '').slice(0,3).toUpperCase()}-${config.ruleSet || ''}`;
-        if (isBackup) return `CST-BKP-${(config.oem || '').slice(0,3).toUpperCase()}-${config.frequency || ''}`;
-        return `CST-${label.replace(/\s+/g, '').slice(0,8).toUpperCase()}`;
-      }
-      item.internalCode = getCustomInternalCode(label, config);
-      item.description = getCustomDescription(label, config);
-      if (!item.unitPrice || item.unitPrice === 0) item.unitPrice = 5000;
+    // Create a normalized version of the edited item
+    let normalizedItem = createNormalizedItem(editValues);
+    
+    // Merge in the current config state
+    if (normalizedItem.category === 'COMPUTE') {
+      normalizedItem.vmConfig = { ...configState };
+      normalizedItem.description = getVmDescription(normalizedItem.vmConfig);
+    } else if (normalizedItem.category === 'STORAGE') {
+      normalizedItem.storageConfig = { ...configState };
+      normalizedItem.description = getStorageDescription(normalizedItem.storageConfig);
+    } else if (normalizedItem.category === 'NETWORK') {
+      normalizedItem.networkConfig = { ...configState };
+      normalizedItem.description = getNetworkDescription(normalizedItem.networkConfig);
+    } else if (normalizedItem.category === 'SECURITY') {
+      normalizedItem.securityConfig = { ...configState };
     } else {
-      // Fallback for other categories
-      item.internalCode = getInternalCode(item);
-      if (!item.unitPrice || item.unitPrice === 0) item.unitPrice = 5000;
+      normalizedItem.config = { ...configState };
     }
-    item.totalPrice = (item.quantity && item.unitPrice) ? item.quantity * item.unitPrice : 0;
-    updated[idx] = item;
+
+    // Recalculate derived values
+    normalizedItem.internalCode = getInternalCode(normalizedItem);
+    normalizedItem.unitPrice = getFloorPriceForItem(normalizedItem);
+    normalizedItem.totalPrice = normalizedItem.unitPrice * (normalizedItem.quantity || 1);
+    normalizedItem.requiresApproval = parseInt(normalizedItem.askPrice) < normalizedItem.unitPrice;
+
+    // Update the items array
+    const updated = [...items];
+    updated[idx] = normalizedItem;
+    
     setItems(updated);
     setEditingIndex(null);
     setEditValues({});
-    if (onEditResource) onEditResource(idx, item);
+    setConfigState({});
+    
+    if (onEditResource) onEditResource(idx, normalizedItem);
     if (typeof onApprovalStatusChange === 'function') {
       onApprovalStatusChange(updated.some(i => i.requiresApproval));
     }
   };
-  const cancelEdit = () => {
-    setEditingIndex(null)
-    setEditValues({})
-  }
 
   // Handle add
   const startAdd = () => {
-    setAdding(true)
-    setAddValues({ sku: '', quantity: 1, unitPrice: '', description: '', custom: false })
-  }
+    setAdding(true);
+    setAddValues({ 
+      sku: DEFAULT_SKU['COMPUTE'],
+      quantity: 1,
+      unitPrice: '',
+      askPrice: '',
+      description: '',
+      custom: false,
+      category: 'COMPUTE',
+      env: 'PROD'
+    });
+  };
+
   const handleAddChange = (field, value) => {
-    setAddValues(prev => ({ ...prev, [field]: value }))
-    if (field === 'sku') {
-      const cat = CATALOG.find(c => c.sku === value)
-      if (cat) {
-        setAddValues(prev => ({
-          ...prev,
-          custom: false,
-          unitPrice: cat.unitPrice,
-          description: cat.label,
-          category: cat.category,
-          internalCode: cat.internalCode
-        }))
+    setAddValues(prev => {
+      let next = { ...prev };
+
+      // Handle the changed field
+      if (field === 'category') {
+        next.category = value.toUpperCase();
+        next.sku = DEFAULT_SKU[next.category];
+      } else if (field === 'sku') {
+        const catalogItem = CATALOG.find(c => c.sku === value || c.internalCode === value);
+        if (catalogItem) {
+          next = {
+            ...next,
+            description: catalogItem.label,
+            category: catalogItem.category.toUpperCase(),
+            unitPrice: catalogItem.unitPrice,
+            askPrice: catalogItem.unitPrice
+          };
+          
+          // For compute items, parse VM config from description
+          if (next.category === 'COMPUTE') {
+            next.vmConfig = parseVmFromDescription(catalogItem.label);
+          }
+        }
+        // Always ensure simple SKU
+        next.sku = DEFAULT_SKU[next.category];
       } else {
-        setAddValues(prev => ({ ...prev, custom: true }))
+        next[field] = value;
       }
-    }
-  }
+
+      // Handle description parsing for configs
+      if (field === 'description' && value) {
+        if (next.category === 'COMPUTE') {
+          next.vmConfig = parseVmFromDescription(value);
+        } else if (next.category === 'STORAGE') {
+          next.storageConfig = parseStorageFromDescription(value);
+        } else if (next.category === 'NETWORK') {
+          next.networkConfig = parseNetworkFromDescription(value);
+        }
+      }
+
+      return next;
+    });
+  };
+
   const saveAdd = () => {
-    if (!addValues.sku || !addValues.quantity || !addValues.unitPrice) return
+    if (!addValues.sku || !addValues.quantity) return;
+
+    // Create base item
     const newItem = {
       ...addValues,
-      internalCode: getInternalCode(addValues),
-      totalPrice: parseInt(addValues.quantity) * parseInt(addValues.unitPrice)
+      category: addValues.category.toUpperCase(),
+      sku: DEFAULT_SKU[addValues.category.toUpperCase()],
+      quantity: parseInt(addValues.quantity) || 1,
+      unitPrice: parseInt(addValues.unitPrice) || 0,
+      askPrice: parseInt(addValues.askPrice) || parseInt(addValues.unitPrice) || 0
+    };
+
+    // Generate internal code based on configuration
+    if (newItem.category === 'COMPUTE' && newItem.vmConfig) {
+      newItem.internalCode = getInternalCode({
+        category: 'COMPUTE',
+        vmConfig: newItem.vmConfig,
+        description: newItem.description
+      });
+    } else if (newItem.category === 'STORAGE' && newItem.storageConfig) {
+      newItem.internalCode = getInternalCode({
+        category: 'STORAGE',
+        storageConfig: newItem.storageConfig,
+        description: newItem.description
+      });
+    } else if (newItem.category === 'NETWORK' && newItem.networkConfig) {
+      newItem.internalCode = getInternalCode({
+        category: 'NETWORK',
+        networkConfig: newItem.networkConfig,
+        description: newItem.description
+      });
+    } else {
+      newItem.internalCode = getInternalCode(newItem);
     }
-    setItems([...items, newItem])
-    setAdding(false)
-    setAddValues({ sku: '', quantity: 1, unitPrice: '', description: '', custom: false })
-    if (onAddResource) onAddResource(newItem)
+
+    // Calculate total price
+    newItem.totalPrice = newItem.unitPrice * newItem.quantity;
+
+    // Check for duplicates using internal code
+    const isDuplicate = items.some(item => item.internalCode === newItem.internalCode);
+    if (isDuplicate) {
+      alert('This item already exists in the BoQ.');
+      return;
+    }
+
+    // Add the item
+    setItems([...items, newItem]);
+    setAdding(false);
+    setAddValues({
+      sku: DEFAULT_SKU['COMPUTE'],
+      quantity: 1,
+      unitPrice: '',
+      askPrice: '',
+      description: '',
+      custom: false,
+      category: 'COMPUTE',
+      env: 'PROD'
+    });
+
+    if (onAddResource) onAddResource(newItem);
     if (typeof onApprovalStatusChange === 'function') {
-      onApprovalStatusChange(items.some(i => i.requiresApproval));
+      onApprovalStatusChange([...items, newItem].some(i => i.requiresApproval));
     }
-  }
+  };
+
   const cancelAdd = () => {
     setAdding(false)
-    setAddValues({ sku: '', quantity: 1, unitPrice: '', description: '', custom: false })
+    setAddValues({ sku: DEFAULT_SKU['COMPUTE'], quantity: 1, unitPrice: '', askPrice: '', description: '', custom: false, category: 'COMPUTE', env: 'PROD' })
   }
 
-  // Helper: Render expanded row for a resource
-  function renderExpandedRow(item, idx) {
-    // VM/Compute
-    if (item.category === 'Compute') {
-      const vmConfig = editValues.vmConfig || item.vmConfig || { vcpu: 2, ram: 4, storage: 50, os: 'windows-2022', features: [] }
-      const handleVmChange = (field, value) => {
-        const newVmConfig = { ...vmConfig, [field]: value }
-        setEditValues(prev => ({
-          ...prev,
-          vmConfig: newVmConfig,
-          internalCode: getInternalCode({ ...prev, vmConfig: newVmConfig }),
-          description: getVmDescription(newVmConfig)
-        }))
-      }
-      const handleVmFeatureToggle = (feature) => {
-        const features = vmConfig.features.includes(feature)
-          ? vmConfig.features.filter(f => f !== feature)
-          : [...vmConfig.features, feature]
-        const newVmConfig = { ...vmConfig, features }
-        setEditValues(prev => ({
-          ...prev,
-          vmConfig: newVmConfig,
-          internalCode: getInternalCode({ ...prev, vmConfig: newVmConfig }),
-          description: getVmDescription(newVmConfig)
-        }))
-      }
-      const floorPrice = vmConfig.vcpu * FLOOR_UNIT_PRICES.vcpu + vmConfig.ram * FLOOR_UNIT_PRICES.ram + vmConfig.storage * FLOOR_UNIT_PRICES.storage + (VM_OS_OPTIONS.find(o => o.value === vmConfig.os)?.price || 0) + (vmConfig.features?.reduce((sum, f) => sum + (VM_FEATURES.find(x => x.value === f)?.price || 0), 0) || 0)
-      const unitPrice = editValues.unitPrice !== undefined ? editValues.unitPrice : floorPrice
-      const belowFloor = unitPrice < floorPrice
-      return (
-        <tr>
-          <td colSpan={editable ? 8 : 7} style={{ background: '#f3f4f6', padding: 0 }}>
-            <div style={{ padding: '1.5rem', display: 'flex', flexWrap: 'wrap', gap: 24 }}>
-              <div>
-                <label>vCPU</label><br/>
-                <input type='number' min={1} max={128} value={vmConfig.vcpu} onChange={e => handleVmChange('vcpu', parseInt(e.target.value))} style={{ width: 60 }} />
-              </div>
-              <div>
-                <label>RAM (GB)</label><br/>
-                <input type='number' min={1} max={1024} value={vmConfig.ram} onChange={e => handleVmChange('ram', parseInt(e.target.value))} style={{ width: 60 }} />
-              </div>
-              <div>
-                <label>Storage (GB)</label><br/>
-                <input type='number' min={10} max={4096} value={vmConfig.storage} onChange={e => handleVmChange('storage', parseInt(e.target.value))} style={{ width: 80 }} />
-              </div>
-              <div>
-                <label>OS</label><br/>
-                <select value={vmConfig.os} onChange={e => handleVmChange('os', e.target.value)}>
-                  {VM_OS_OPTIONS.map(os => <option key={os.value} value={os.value}>{os.label}</option>)}
-                </select>
-              </div>
-              <div>
-                <label>Features</label><br/>
-                {VM_FEATURES.map(f => (
-                  <label key={f.value} style={{ marginRight: 8 }}>
-                    <input type='checkbox' checked={vmConfig.features.includes(f.value)} onChange={() => handleVmFeatureToggle(f.value)} /> {f.label}
-                  </label>
-                ))}
-              </div>
-              <div>
-                <label>Quantity</label><br/>
-                <input type='number' min={1} value={editValues.quantity} onChange={e => setEditValues(prev => ({ ...prev, quantity: parseInt(e.target.value), description: getVmDescription(vmConfig) }))} style={{ width: 60 }} />
-              </div>
-              <div>
-                <label>Unit Price</label><br/>
-                <input type='number' value={unitPrice} onChange={e => setEditValues(prev => ({ ...prev, unitPrice: parseInt(e.target.value) }))} style={{ width: 100, background: belowFloor ? '#fef3c7' : '#e5e7eb' }} />
-                {belowFloor && <div style={{ color: '#b45309', fontSize: 12 }}>Below floor price! Approval required.</div>}
-              </div>
-              <div>
-                <label>Internal Code</label><br/>
-                <input value={getInternalCode({ ...editValues, vmConfig })} readOnly style={{ width: 180, background: '#e5e7eb' }} />
-              </div>
-              <div>
-                <label>Description</label><br/>
-                <input value={getVmDescription(vmConfig)} readOnly style={{ width: 260, background: '#e5e7eb' }} />
-              </div>
-              <div>
-                <label>Total Price</label><br/>
-                <input value={editValues.quantity * unitPrice} readOnly style={{ width: 120, background: '#e5e7eb' }} />
-              </div>
-              <div style={{ alignSelf: 'end' }}>
-                <button onClick={() => saveEdit(idx)} style={{ background: belowFloor ? '#d1d5db' : '#2563eb', color: belowFloor ? '#6b7280' : 'white', border: 'none', borderRadius: 4, padding: '0.5rem 1.25rem', marginRight: 8 }} disabled={belowFloor}>Save</button>
-                <button onClick={cancelEdit} style={{ background: '#f3f4f6', border: 'none', borderRadius: 4, padding: '0.5rem 1.25rem' }}>Cancel</button>
-              </div>
-            </div>
-          </td>
-        </tr>
-      )
+  // Helper function to determine if a row is a custom SKU
+  const isCustomSku = (item) => {
+    const cat = (item.category || '').toString().toUpperCase();
+    const sku = (item.sku || '').toString().toUpperCase();
+    const result = cat === 'CUSTOM' || sku.includes('CUSTOM');
+    return result;
+  };
+
+  // Helper function to determine if a row is editable
+  const isRowEditable = (item) => {
+    if (!editable) return false;
+    if (restrictEditToStandardSkus) {
+      const custom = isCustomSku(item);
+      return !custom;
     }
-    // Storage
-    if (item.category === 'Storage') {
-      const storageConfig = editValues.storageConfig || item.storageConfig || { size: 100, iops: 3000, type: 'ssd', encrypted: false }
-      const handleStorageChange = (field, value) => {
-        const newStorageConfig = { ...storageConfig, [field]: value }
-        setEditValues(prev => ({
-          ...prev,
-          storageConfig: newStorageConfig,
-          internalCode: getInternalCode({ ...prev, storageConfig: newStorageConfig }),
-          description: getStorageDescription(newStorageConfig)
-        }))
-      }
-      const floorPrice = storageConfig.size * FLOOR_UNIT_PRICES.storage
-      const unitPrice = editValues.unitPrice !== undefined ? editValues.unitPrice : floorPrice
-      const belowFloor = unitPrice < floorPrice
-      return (
-        <tr>
-          <td colSpan={editable ? 8 : 7} style={{ background: '#f3f4f6', padding: 0 }}>
-            <div style={{ padding: '1.5rem', display: 'flex', flexWrap: 'wrap', gap: 24 }}>
-              <div>
-                <label>Size (GB)</label><br/>
-                <input type='number' min={1} max={4096} value={storageConfig.size} onChange={e => handleStorageChange('size', parseInt(e.target.value))} style={{ width: 80 }} />
-              </div>
-              <div>
-                <label>IOPS</label><br/>
-                <input type='number' min={100} max={100000} value={storageConfig.iops} onChange={e => handleStorageChange('iops', parseInt(e.target.value))} style={{ width: 80 }} />
-              </div>
-              <div>
-                <label>Type</label><br/>
-                <select value={storageConfig.type} onChange={e => handleStorageChange('type', e.target.value)}>
-                  <option value='ssd'>SSD</option>
-                  <option value='hdd'>HDD</option>
-                </select>
-              </div>
-              <div>
-                <label>Encrypted</label><br/>
-                <input type='checkbox' checked={storageConfig.encrypted} onChange={e => handleStorageChange('encrypted', e.target.checked)} />
-              </div>
-              <div>
-                <label>Quantity</label><br/>
-                <input type='number' min={1} value={editValues.quantity} onChange={e => setEditValues(prev => ({ ...prev, quantity: parseInt(e.target.value), description: getStorageDescription(storageConfig) }))} style={{ width: 60 }} />
-              </div>
-              <div>
-                <label>Unit Price</label><br/>
-                <input type='number' value={unitPrice} onChange={e => setEditValues(prev => ({ ...prev, unitPrice: parseInt(e.target.value) }))} style={{ width: 100, background: belowFloor ? '#fef3c7' : '#e5e7eb' }} />
-                {belowFloor && <div style={{ color: '#b45309', fontSize: 12 }}>Below floor price! Approval required.</div>}
-              </div>
-              <div>
-                <label>Internal Code</label><br/>
-                <input value={getInternalCode({ ...editValues, storageConfig })} readOnly style={{ width: 180, background: '#e5e7eb' }} />
-              </div>
-              <div>
-                <label>Description</label><br/>
-                <input value={getStorageDescription(storageConfig)} readOnly style={{ width: 260, background: '#e5e7eb' }} />
-              </div>
-              <div>
-                <label>Total Price</label><br/>
-                <input value={editValues.quantity * unitPrice} readOnly style={{ width: 120, background: '#e5e7eb' }} />
-              </div>
-              <div style={{ alignSelf: 'end' }}>
-                <button onClick={() => saveEdit(idx)} style={{ background: belowFloor ? '#d1d5db' : '#2563eb', color: belowFloor ? '#6b7280' : 'white', border: 'none', borderRadius: 4, padding: '0.5rem 1.25rem', marginRight: 8 }} disabled={belowFloor}>Save</button>
-                <button onClick={cancelEdit} style={{ background: '#f3f4f6', border: 'none', borderRadius: 4, padding: '0.5rem 1.25rem' }}>Cancel</button>
-              </div>
-            </div>
-          </td>
-        </tr>
-      )
+    if (restrictEditToCustomSkus) {
+      const custom = isCustomSku(item);
+      return custom;
     }
-    // Network
-    if (item.category === 'Network') {
-      const networkConfig = editValues.networkConfig || item.networkConfig || { bandwidth: 100, staticIp: false, firewall: false }
-      const handleNetworkChange = (field, value) => {
-        const newNetworkConfig = { ...networkConfig, [field]: value }
-        setEditValues(prev => ({
-          ...prev,
-          networkConfig: newNetworkConfig,
-          internalCode: getInternalCode({ ...prev, networkConfig: newNetworkConfig }),
-          description: getNetworkDescription(newNetworkConfig)
-        }))
-      }
-      const floorPrice = FLOOR_UNIT_PRICES.network
-      const unitPrice = editValues.unitPrice !== undefined ? editValues.unitPrice : floorPrice
-      const belowFloor = unitPrice < floorPrice
-      return (
-        <tr>
-          <td colSpan={editable ? 8 : 7} style={{ background: '#f3f4f6', padding: 0 }}>
-            <div style={{ padding: '1.5rem', display: 'flex', flexWrap: 'wrap', gap: 24 }}>
-              <div>
-                <label>Bandwidth (Mbps)</label><br/>
-                <input type='number' min={1} max={10000} value={networkConfig.bandwidth} onChange={e => handleNetworkChange('bandwidth', parseInt(e.target.value))} style={{ width: 100 }} />
-              </div>
-              <div>
-                <label>Static IP</label><br/>
-                <input type='checkbox' checked={networkConfig.staticIp} onChange={e => handleNetworkChange('staticIp', e.target.checked)} />
-              </div>
-              <div>
-                <label>Firewall</label><br/>
-                <input type='checkbox' checked={networkConfig.firewall} onChange={e => handleNetworkChange('firewall', e.target.checked)} />
-              </div>
-              <div>
-                <label>Quantity</label><br/>
-                <input type='number' min={1} value={editValues.quantity} onChange={e => setEditValues(prev => ({ ...prev, quantity: parseInt(e.target.value), description: getNetworkDescription(networkConfig) }))} style={{ width: 60 }} />
-              </div>
-              <div>
-                <label>Unit Price</label><br/>
-                <input type='number' value={unitPrice} onChange={e => setEditValues(prev => ({ ...prev, unitPrice: parseInt(e.target.value) }))} style={{ width: 100, background: belowFloor ? '#fef3c7' : '#e5e7eb' }} />
-                {belowFloor && <div style={{ color: '#b45309', fontSize: 12 }}>Below floor price! Approval required.</div>}
-              </div>
-              <div>
-                <label>Internal Code</label><br/>
-                <input value={getInternalCode({ ...editValues, networkConfig })} readOnly style={{ width: 180, background: '#e5e7eb' }} />
-              </div>
-              <div>
-                <label>Description</label><br/>
-                <input value={getNetworkDescription(networkConfig)} readOnly style={{ width: 260, background: '#e5e7eb' }} />
-              </div>
-              <div>
-                <label>Total Price</label><br/>
-                <input value={editValues.quantity * unitPrice} readOnly style={{ width: 120, background: '#e5e7eb' }} />
-              </div>
-              <div style={{ alignSelf: 'end' }}>
-                <button onClick={() => saveEdit(idx)} style={{ background: belowFloor ? '#d1d5db' : '#2563eb', color: belowFloor ? '#6b7280' : 'white', border: 'none', borderRadius: 4, padding: '0.5rem 1.25rem', marginRight: 8 }} disabled={belowFloor}>Save</button>
-                <button onClick={cancelEdit} style={{ background: '#f3f4f6', border: 'none', borderRadius: 4, padding: '0.5rem 1.25rem' }}>Cancel</button>
-              </div>
-            </div>
-          </td>
-        </tr>
-      )
-    }
-    // Firewall / Security
-    if (item.category === 'Security' || item.category === 'Firewall') {
-      const fwConfig = editValues.fwConfig || item.fwConfig || { ruleSet: 'Standard', throughput: 100, ha: false, name: item.description || '' };
-      const handleFwChange = (field, value) => {
-        const newFwConfig = { ...fwConfig, [field]: value };
-        setEditValues(prev => ({
-          ...prev,
-          fwConfig: newFwConfig,
-          description: `Firewall - ${newFwConfig.ruleSet}, ${newFwConfig.throughput}Mbps${newFwConfig.ha ? ', HA' : ''}`,
-          internalCode: getInternalCode({ ...prev, fwConfig: newFwConfig })
-        }));
-      };
-      const floorPrice = FLOOR_UNIT_PRICES[item.sku] || 0;
-      const unitPrice = editValues.unitPrice !== undefined ? editValues.unitPrice : floorPrice;
-      const belowFloor = unitPrice < floorPrice;
-      return (
-        <tr>
-          <td colSpan={editable ? 8 : 7} style={{ background: '#f3f4f6', padding: 0 }}>
-            <div style={{ padding: '1.5rem', display: 'flex', flexWrap: 'wrap', gap: 24 }}>
-              <div>
-                <label>Rule Set</label><br/>
-                <select value={fwConfig.ruleSet} onChange={e => handleFwChange('ruleSet', e.target.value)}>
-                  <option value='Standard'>Standard</option>
-                  <option value='Enterprise'>Enterprise</option>
-                  <option value='Custom'>Custom</option>
-                </select>
-              </div>
-              <div>
-                <label>Throughput (Mbps)</label><br/>
-                <input type='number' min={10} max={10000} value={fwConfig.throughput} onChange={e => handleFwChange('throughput', parseInt(e.target.value))} style={{ width: 100 }} />
-              </div>
-              <div>
-                <label>High Availability</label><br/>
-                <input type='checkbox' checked={fwConfig.ha} onChange={e => handleFwChange('ha', e.target.checked)} />
-              </div>
-              <div>
-                <label>Quantity</label><br/>
-                <input type='number' min={1} value={editValues.quantity} onChange={e => setEditValues(prev => ({ ...prev, quantity: parseInt(e.target.value) }))} style={{ width: 60 }} />
-              </div>
-              <div>
-                <label>Unit Price</label><br/>
-                <input type='number' value={unitPrice} onChange={e => setEditValues(prev => ({ ...prev, unitPrice: parseInt(e.target.value) }))} style={{ width: 100, background: belowFloor ? '#fef3c7' : '#e5e7eb' }} />
-                {belowFloor && <div style={{ color: '#b45309', fontSize: 12 }}>Below floor price! Approval required.</div>}
-              </div>
-              <div>
-                <label>Description</label><br/>
-                <input value={editValues.description} readOnly style={{ width: 260, background: '#e5e7eb' }} />
-              </div>
-              <div>
-                <label>Internal Code</label><br/>
-                <input value={getInternalCode({ ...editValues, fwConfig })} readOnly style={{ width: 180, background: '#e5e7eb' }} />
-              </div>
-              <div>
-                <label>Total Price</label><br/>
-                <input value={editValues.quantity * unitPrice} readOnly style={{ width: 120, background: '#e5e7eb' }} />
-              </div>
-              <div style={{ alignSelf: 'end' }}>
-                <button onClick={() => saveEdit(idx)} style={{ background: belowFloor ? '#d1d5db' : '#2563eb', color: belowFloor ? '#6b7280' : 'white', border: 'none', borderRadius: 4, padding: '0.5rem 1.25rem', marginRight: 8 }} disabled={belowFloor}>Save</button>
-                <button onClick={cancelEdit} style={{ background: '#f3f4f6', border: 'none', borderRadius: 4, padding: '0.5rem 1.25rem' }}>Cancel</button>
-              </div>
-            </div>
-          </td>
-        </tr>
-      );
-    }
-    // Backup
-    if (item.category === 'Backup') {
-      const backupConfig = editValues.backupConfig || item.backupConfig || { frequency: 'Daily', retention: 30, encrypted: false };
-      const handleBackupChange = (field, value) => {
-        const newBackupConfig = { ...backupConfig, [field]: value };
-        setEditValues(prev => ({
-          ...prev,
-          backupConfig: newBackupConfig,
-          description: `Backup - ${newBackupConfig.frequency}, ${newBackupConfig.retention}d${newBackupConfig.encrypted ? ', Encrypted' : ''}`,
-          internalCode: getInternalCode({ ...prev, backupConfig: newBackupConfig })
-        }));
-      };
-      const floorPrice = FLOOR_UNIT_PRICES[item.sku] || 0;
-      const unitPrice = editValues.unitPrice !== undefined ? editValues.unitPrice : floorPrice;
-      const belowFloor = unitPrice < floorPrice;
-      return (
-        <tr>
-          <td colSpan={editable ? 8 : 7} style={{ background: '#f3f4f6', padding: 0 }}>
-            <div style={{ padding: '1.5rem', display: 'flex', flexWrap: 'wrap', gap: 24 }}>
-              <div>
-                <label>Frequency</label><br/>
-                <select value={backupConfig.frequency} onChange={e => handleBackupChange('frequency', e.target.value)}>
-                  <option value='Daily'>Daily</option>
-                  <option value='Weekly'>Weekly</option>
-                  <option value='Monthly'>Monthly</option>
-                </select>
-              </div>
-              <div>
-                <label>Retention (days)</label><br/>
-                <input type='number' min={1} max={365} value={backupConfig.retention} onChange={e => handleBackupChange('retention', parseInt(e.target.value))} style={{ width: 80 }} />
-              </div>
-              <div>
-                <label>Encrypted</label><br/>
-                <input type='checkbox' checked={backupConfig.encrypted} onChange={e => handleBackupChange('encrypted', e.target.checked)} />
-              </div>
-              <div>
-                <label>Quantity</label><br/>
-                <input type='number' min={1} value={editValues.quantity} onChange={e => setEditValues(prev => ({ ...prev, quantity: parseInt(e.target.value) }))} style={{ width: 60 }} />
-              </div>
-              <div>
-                <label>Unit Price</label><br/>
-                <input type='number' value={unitPrice} onChange={e => setEditValues(prev => ({ ...prev, unitPrice: parseInt(e.target.value) }))} style={{ width: 100, background: belowFloor ? '#fef3c7' : '#e5e7eb' }} />
-                {belowFloor && <div style={{ color: '#b45309', fontSize: 12 }}>Below floor price! Approval required.</div>}
-              </div>
-              <div>
-                <label>Description</label><br/>
-                <input value={editValues.description} readOnly style={{ width: 260, background: '#e5e7eb' }} />
-              </div>
-              <div>
-                <label>Internal Code</label><br/>
-                <input value={getInternalCode({ ...editValues, backupConfig })} readOnly style={{ width: 180, background: '#e5e7eb' }} />
-              </div>
-              <div>
-                <label>Total Price</label><br/>
-                <input value={editValues.quantity * unitPrice} readOnly style={{ width: 120, background: '#e5e7eb' }} />
-              </div>
-              <div style={{ alignSelf: 'end' }}>
-                <button onClick={() => saveEdit(idx)} style={{ background: belowFloor ? '#d1d5db' : '#2563eb', color: belowFloor ? '#6b7280' : 'white', border: 'none', borderRadius: 4, padding: '0.5rem 1.25rem', marginRight: 8 }} disabled={belowFloor}>Save</button>
-                <button onClick={cancelEdit} style={{ background: '#f3f4f6', border: 'none', borderRadius: 4, padding: '0.5rem 1.25rem' }}>Cancel</button>
-              </div>
-            </div>
-          </td>
-        </tr>
-      );
-    }
-    // VPN
-    if (item.category === 'VPN') {
-      const vpnConfig = editValues.vpnConfig || item.vpnConfig || { type: 'Site-to-Site', connections: 10, encrypted: false };
-      const handleVpnChange = (field, value) => {
-        const newVpnConfig = { ...vpnConfig, [field]: value };
-        setEditValues(prev => ({
-          ...prev,
-          vpnConfig: newVpnConfig,
-          description: `VPN - ${newVpnConfig.type}, ${newVpnConfig.connections} connections${newVpnConfig.encrypted ? ', Encrypted' : ''}`,
-          internalCode: getInternalCode({ ...prev, vpnConfig: newVpnConfig })
-        }));
-      };
-      const floorPrice = FLOOR_UNIT_PRICES[item.sku] || 0;
-      const unitPrice = editValues.unitPrice !== undefined ? editValues.unitPrice : floorPrice;
-      const belowFloor = unitPrice < floorPrice;
-      return (
-        <tr>
-          <td colSpan={editable ? 8 : 7} style={{ background: '#f3f4f6', padding: 0 }}>
-            <div style={{ padding: '1.5rem', display: 'flex', flexWrap: 'wrap', gap: 24 }}>
-              <div>
-                <label>Type</label><br/>
-                <select value={vpnConfig.type} onChange={e => handleVpnChange('type', e.target.value)}>
-                  <option value='Site-to-Site'>Site-to-Site</option>
-                  <option value='Point-to-Site'>Point-to-Site</option>
-                </select>
-              </div>
-              <div>
-                <label>Connections</label><br/>
-                <input type='number' min={1} max={1000} value={vpnConfig.connections} onChange={e => handleVpnChange('connections', parseInt(e.target.value))} style={{ width: 100 }} />
-              </div>
-              <div>
-                <label>Encrypted</label><br/>
-                <input type='checkbox' checked={vpnConfig.encrypted} onChange={e => handleVpnChange('encrypted', e.target.checked)} />
-              </div>
-              <div>
-                <label>Quantity</label><br/>
-                <input type='number' min={1} value={editValues.quantity} onChange={e => setEditValues(prev => ({ ...prev, quantity: parseInt(e.target.value) }))} style={{ width: 60 }} />
-              </div>
-              <div>
-                <label>Unit Price</label><br/>
-                <input type='number' value={unitPrice} onChange={e => setEditValues(prev => ({ ...prev, unitPrice: parseInt(e.target.value) }))} style={{ width: 100, background: belowFloor ? '#fef3c7' : '#e5e7eb' }} />
-                {belowFloor && <div style={{ color: '#b45309', fontSize: 12 }}>Below floor price! Approval required.</div>}
-              </div>
-              <div>
-                <label>Description</label><br/>
-                <input value={editValues.description} readOnly style={{ width: 260, background: '#e5e7eb' }} />
-              </div>
-              <div>
-                <label>Internal Code</label><br/>
-                <input value={getInternalCode({ ...editValues, vpnConfig })} readOnly style={{ width: 180, background: '#e5e7eb' }} />
-              </div>
-              <div>
-                <label>Total Price</label><br/>
-                <input value={editValues.quantity * unitPrice} readOnly style={{ width: 120, background: '#e5e7eb' }} />
-              </div>
-              <div style={{ alignSelf: 'end' }}>
-                <button onClick={() => saveEdit(idx)} style={{ background: belowFloor ? '#d1d5db' : '#2563eb', color: belowFloor ? '#6b7280' : 'white', border: 'none', borderRadius: 4, padding: '0.5rem 1.25rem', marginRight: 8 }} disabled={belowFloor}>Save</button>
-                <button onClick={cancelEdit} style={{ background: '#f3f4f6', border: 'none', borderRadius: 4, padding: '0.5rem 1.25rem' }}>Cancel</button>
-              </div>
-            </div>
-          </td>
-        </tr>
-      );
-    }
-    // Internet
-    if (item.category === 'Internet') {
-      const inetConfig = editValues.inetConfig || item.inetConfig || { bandwidth: 100, staticIp: false, ddos: false };
-      const handleInetChange = (field, value) => {
-        const newInetConfig = { ...inetConfig, [field]: value };
-        setEditValues(prev => ({
-          ...prev,
-          inetConfig: newInetConfig,
-          description: `Internet - ${newInetConfig.bandwidth}Mbps${newInetConfig.staticIp ? ', Static IP' : ''}${newInetConfig.ddos ? ', DDoS' : ''}`,
-          internalCode: getInternalCode({ ...prev, inetConfig: newInetConfig })
-        }));
-      };
-      const floorPrice = FLOOR_UNIT_PRICES[item.sku] || 0;
-      const unitPrice = editValues.unitPrice !== undefined ? editValues.unitPrice : floorPrice;
-      const belowFloor = unitPrice < floorPrice;
-      return (
-        <tr>
-          <td colSpan={editable ? 8 : 7} style={{ background: '#f3f4f6', padding: 0 }}>
-            <div style={{ padding: '1.5rem', display: 'flex', flexWrap: 'wrap', gap: 24 }}>
-              <div>
-                <label>Bandwidth (Mbps)</label><br/>
-                <input type='number' min={1} max={10000} value={inetConfig.bandwidth} onChange={e => handleInetChange('bandwidth', parseInt(e.target.value))} style={{ width: 100 }} />
-              </div>
-              <div>
-                <label>Static IP</label><br/>
-                <input type='checkbox' checked={inetConfig.staticIp} onChange={e => handleInetChange('staticIp', e.target.checked)} />
-              </div>
-              <div>
-                <label>DDoS Protection</label><br/>
-                <input type='checkbox' checked={inetConfig.ddos} onChange={e => handleInetChange('ddos', e.target.checked)} />
-              </div>
-              <div>
-                <label>Quantity</label><br/>
-                <input type='number' min={1} value={editValues.quantity} onChange={e => setEditValues(prev => ({ ...prev, quantity: parseInt(e.target.value) }))} style={{ width: 60 }} />
-              </div>
-              <div>
-                <label>Unit Price</label><br/>
-                <input type='number' value={unitPrice} onChange={e => setEditValues(prev => ({ ...prev, unitPrice: parseInt(e.target.value) }))} style={{ width: 100, background: belowFloor ? '#fef3c7' : '#e5e7eb' }} />
-                {belowFloor && <div style={{ color: '#b45309', fontSize: 12 }}>Below floor price! Approval required.</div>}
-              </div>
-              <div>
-                <label>Description</label><br/>
-                <input value={editValues.description} readOnly style={{ width: 260, background: '#e5e7eb' }} />
-              </div>
-              <div>
-                <label>Internal Code</label><br/>
-                <input value={getInternalCode({ ...editValues, inetConfig })} readOnly style={{ width: 180, background: '#e5e7eb' }} />
-              </div>
-              <div>
-                <label>Total Price</label><br/>
-                <input value={editValues.quantity * unitPrice} readOnly style={{ width: 120, background: '#e5e7eb' }} />
-              </div>
-              <div style={{ alignSelf: 'end' }}>
-                <button onClick={() => saveEdit(idx)} style={{ background: belowFloor ? '#d1d5db' : '#2563eb', color: belowFloor ? '#6b7280' : 'white', border: 'none', borderRadius: 4, padding: '0.5rem 1.25rem', marginRight: 8 }} disabled={belowFloor}>Save</button>
-                <button onClick={cancelEdit} style={{ background: '#f3f4f6', border: 'none', borderRadius: 4, padding: '0.5rem 1.25rem' }}>Cancel</button>
-              </div>
-            </div>
-          </td>
-        </tr>
-      );
-    }
-    // Custom Category (dynamic form)
-    if (item.category === 'Custom') {
-      // Try to infer type from name/label/description
-      const label = editValues.name || editValues.label || item.name || item.label || item.description || '';
-      const lowerLabel = label.toLowerCase();
-      // Dynamic fields
-      const isVDI = lowerLabel.includes('vdi');
-      const isStorage = lowerLabel.includes('storage');
-      const isNetwork = lowerLabel.includes('network') || lowerLabel.includes('vpn');
-      const isFirewall = lowerLabel.includes('firewall') || lowerLabel.includes('security');
-      const isBackup = lowerLabel.includes('backup') || lowerLabel.includes('dr');
-      // State for dynamic fields
-      const customConfig = editValues.customConfig || item.customConfig || {};
-      const handleCustomChange = (field, value) => {
-        setEditValues(prev => {
-          const newConfig = { ...prev.customConfig, [field]: value };
-          // Update description and internal code live
-          return {
-            ...prev,
-            customConfig: newConfig,
-            description: getCustomDescription(label, newConfig),
-            internalCode: getCustomInternalCode(label, newConfig)
-          };
-        });
-      };
-      // Helper for description/internal code
-      function getCustomDescription(label, config) {
-        if (isVDI) return `VDI - ${config.oem || ''} - ${config.users || ''} users, ${config.vcpu || ''} vCPU, ${config.ram || ''}GB RAM, ${config.storage || ''}GB, ${config.os || ''}`;
-        if (isStorage) return `Storage - ${config.oem || ''} - ${config.size || ''}GB ${config.type || ''}, ${config.iops || ''} IOPS`;
-        if (isNetwork) return `Network - ${config.oem || ''} - ${config.bandwidth || ''}Mbps, ${config.connections || ''} connections`;
-        if (isFirewall) return `Firewall - ${config.oem || ''} - ${config.ruleSet || ''}, ${config.throughput || ''}Mbps`;
-        if (isBackup) return `Backup - ${config.oem || ''} - ${config.frequency || ''}, ${config.retention || ''}d`;
-        return label;
-      }
-      function getCustomInternalCode(label, config) {
-        if (isVDI) return `VDI-${(config.oem || '').slice(0,3).toUpperCase()}-${config.users || ''}U`;
-        if (isStorage) return `CST-ST-${(config.oem || '').slice(0,3).toUpperCase()}-${config.size || ''}G`;
-        if (isNetwork) return `CST-NW-${(config.oem || '').slice(0,3).toUpperCase()}-${config.bandwidth || ''}M`;
-        if (isFirewall) return `CST-FW-${(config.oem || '').slice(0,3).toUpperCase()}-${config.ruleSet || ''}`;
-        if (isBackup) return `CST-BKP-${(config.oem || '').slice(0,3).toUpperCase()}-${config.frequency || ''}`;
-        return `CST-${label.replace(/\s+/g, '').slice(0,8).toUpperCase()}`;
-      }
-      const unitPrice = editValues.unitPrice !== undefined ? editValues.unitPrice : 5000;
-      return (
-        <tr>
-          <td colSpan={editable ? 8 : 7} style={{ background: '#f3f4f6', padding: 0 }}>
-            <div style={{ padding: '1.5rem', display: 'flex', flexWrap: 'wrap', gap: 24 }}>
-              <div>
-                <label>Name/Label</label><br/>
-                <input value={label} onChange={e => setEditValues(prev => ({ ...prev, name: e.target.value }))} style={{ width: 200 }} />
-              </div>
-              <div>
-                <label>OEM/Brand</label><br/>
-                <input value={customConfig.oem || ''} onChange={e => handleCustomChange('oem', e.target.value)} style={{ width: 120 }} />
-              </div>
-              {isVDI && <>
-                <div>
-                  <label>Number of Users</label><br/>
-                  <input type='number' min={1} value={customConfig.users || ''} onChange={e => handleCustomChange('users', parseInt(e.target.value))} style={{ width: 80 }} />
-                </div>
-                <div>
-                  <label>vCPU per User</label><br/>
-                  <input type='number' min={1} value={customConfig.vcpu || ''} onChange={e => handleCustomChange('vcpu', parseInt(e.target.value))} style={{ width: 60 }} />
-                </div>
-                <div>
-                  <label>RAM per User (GB)</label><br/>
-                  <input type='number' min={1} value={customConfig.ram || ''} onChange={e => handleCustomChange('ram', parseInt(e.target.value))} style={{ width: 60 }} />
-                </div>
-                <div>
-                  <label>Storage per User (GB)</label><br/>
-                  <input type='number' min={1} value={customConfig.storage || ''} onChange={e => handleCustomChange('storage', parseInt(e.target.value))} style={{ width: 80 }} />
-                </div>
-                <div>
-                  <label>OS Type</label><br/>
-                  <input value={customConfig.os || ''} onChange={e => handleCustomChange('os', e.target.value)} style={{ width: 100 }} />
-                </div>
-              </>}
-              {isStorage && <>
-                <div>
-                  <label>Size (GB)</label><br/>
-                  <input type='number' min={1} value={customConfig.size || ''} onChange={e => handleCustomChange('size', parseInt(e.target.value))} style={{ width: 80 }} />
-                </div>
-                <div>
-                  <label>Type</label><br/>
-                  <input value={customConfig.type || ''} onChange={e => handleCustomChange('type', e.target.value)} style={{ width: 80 }} />
-                </div>
-                <div>
-                  <label>IOPS</label><br/>
-                  <input type='number' min={1} value={customConfig.iops || ''} onChange={e => handleCustomChange('iops', parseInt(e.target.value))} style={{ width: 80 }} />
-                </div>
-              </>}
-              {isNetwork && <>
-                <div>
-                  <label>Bandwidth (Mbps)</label><br/>
-                  <input type='number' min={1} value={customConfig.bandwidth || ''} onChange={e => handleCustomChange('bandwidth', parseInt(e.target.value))} style={{ width: 100 }} />
-                </div>
-                <div>
-                  <label>Connections</label><br/>
-                  <input type='number' min={1} value={customConfig.connections || ''} onChange={e => handleCustomChange('connections', parseInt(e.target.value))} style={{ width: 80 }} />
-                </div>
-              </>}
-              {isFirewall && <>
-                <div>
-                  <label>Rule Set</label><br/>
-                  <input value={customConfig.ruleSet || ''} onChange={e => handleCustomChange('ruleSet', e.target.value)} style={{ width: 100 }} />
-                </div>
-                <div>
-                  <label>Throughput (Mbps)</label><br/>
-                  <input type='number' min={1} value={customConfig.throughput || ''} onChange={e => handleCustomChange('throughput', parseInt(e.target.value))} style={{ width: 100 }} />
-                </div>
-              </>}
-              {isBackup && <>
-                <div>
-                  <label>Frequency</label><br/>
-                  <input value={customConfig.frequency || ''} onChange={e => handleCustomChange('frequency', e.target.value)} style={{ width: 100 }} />
-                </div>
-                <div>
-                  <label>Retention (days)</label><br/>
-                  <input type='number' min={1} value={customConfig.retention || ''} onChange={e => handleCustomChange('retention', parseInt(e.target.value))} style={{ width: 80 }} />
-                </div>
-              </>}
-              {/* Always show these */}
-              <div>
-                <label>Quantity</label><br/>
-                <input type='number' min={1} value={editValues.quantity} onChange={e => setEditValues(prev => ({ ...prev, quantity: parseInt(e.target.value) }))} style={{ width: 60 }} />
-              </div>
-              <div>
-                <label>Unit Price</label><br/>
-                <input type='number' value={unitPrice} onChange={e => setEditValues(prev => ({ ...prev, unitPrice: parseInt(e.target.value) }))} style={{ width: 100 }} />
-              </div>
-              <div>
-                <label>Internal Code</label><br/>
-                <input value={getCustomInternalCode(label, customConfig)} readOnly style={{ width: 180, background: '#e5e7eb' }} />
-              </div>
-              <div>
-                <label>Description</label><br/>
-                <input value={getCustomDescription(label, customConfig)} readOnly style={{ width: 260, background: '#e5e7eb' }} />
-              </div>
-              <div>
-                <label>Notes/Specs</label><br/>
-                <input value={customConfig.notes || ''} onChange={e => handleCustomChange('notes', e.target.value)} style={{ width: 220 }} />
-              </div>
-              <div>
-                <label>Total Price</label><br/>
-                <input value={editValues.quantity * unitPrice} readOnly style={{ width: 120, background: '#e5e7eb' }} />
-              </div>
-              <div style={{ alignSelf: 'end' }}>
-                <button onClick={() => saveEdit(idx)} style={{ background: '#2563eb', color: 'white', border: 'none', borderRadius: 4, padding: '0.5rem 1.25rem', marginRight: 8 }}>Save</button>
-                <button onClick={cancelEdit} style={{ background: '#f3f4f6', border: 'none', borderRadius: 4, padding: '0.5rem 1.25rem' }}>Cancel</button>
-              </div>
-            </div>
-          </td>
-        </tr>
-      );
-    }
-    // For all other catalog items (default case)
-    const simpleServiceCategories = ['Security', 'Backup', 'VPN', 'Internet', 'Firewall'];
-    if (simpleServiceCategories.includes(item.category)) {
-      const floorPrice = FLOOR_UNIT_PRICES[item.sku] || 0;
-      const unitPrice = editValues.unitPrice !== undefined ? editValues.unitPrice : floorPrice;
-      const belowFloor = unitPrice < floorPrice;
-      return (
-        <tr>
-          <td colSpan={editable ? 8 : 7} style={{ background: '#f3f4f6', padding: 0 }}>
-            <div style={{ padding: '1.5rem', display: 'flex', flexWrap: 'wrap', gap: 24 }}>
-              <div>
-                <label>Quantity</label><br/>
-                <input type='number' min={1} value={editValues.quantity} onChange={e => setEditValues(prev => ({ ...prev, quantity: parseInt(e.target.value) }))} style={{ width: 60 }} />
-              </div>
-              <div>
-                <label>Unit Price</label><br/>
-                <input type='number' value={unitPrice} onChange={e => setEditValues(prev => ({ ...prev, unitPrice: parseInt(e.target.value) }))} style={{ width: 100, background: belowFloor ? '#fef3c7' : '#e5e7eb' }} />
-                {belowFloor && <div style={{ color: '#b45309', fontSize: 12 }}>Below floor price! Approval required.</div>}
-              </div>
-              <div>
-                <label>Description</label><br/>
-                <input value={editValues.description} onChange={e => setEditValues(prev => ({ ...prev, description: e.target.value }))} style={{ width: 260 }} />
-              </div>
-              <div>
-                <label>Internal Code</label><br/>
-                <input value={getInternalCode(editValues)} readOnly style={{ width: 180, background: '#e5e7eb' }} />
-              </div>
-              <div>
-                <label>Total Price</label><br/>
-                <input value={editValues.quantity * unitPrice} readOnly style={{ width: 120, background: '#e5e7eb' }} />
-              </div>
-              <div style={{ alignSelf: 'end' }}>
-                <button onClick={() => saveEdit(idx)} style={{ background: belowFloor ? '#d1d5db' : '#2563eb', color: belowFloor ? '#6b7280' : 'white', border: 'none', borderRadius: 4, padding: '0.5rem 1.25rem', marginRight: 8 }} disabled={belowFloor}>Save</button>
-                <button onClick={cancelEdit} style={{ background: '#f3f4f6', border: 'none', borderRadius: 4, padding: '0.5rem 1.25rem' }}>Cancel</button>
-              </div>
-            </div>
-          </td>
-        </tr>
-      );
-    }
-    return null
-  }
+    return true;
+  };
+
+  // Helper function to start editing
+  const handleStartEdit = (idx, item) => {
+    setEditingIndex(idx);
+    setEditValues({
+      ...item,
+      askPrice: item.askPrice || item.unitPrice,
+      custom: !CATALOG.some(c => c.sku === item.sku)
+    });
+    setExpandedIndex(idx);
+  };
 
   return (
     <div style={{ background: 'white', borderRadius: 8, border: '1px solid #e5e7eb', marginBottom: 32, overflow: 'hidden' }}>
@@ -911,33 +611,122 @@ const BoQTable = ({ items, setItems, editable, highlightNew, onAddResource, onEd
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 15 }}>
           <thead style={{ background: '#f3f4f6' }}>
             <tr>
+              <th style={{ padding: '0.75rem', textAlign: 'left', fontWeight: 600 }}>Env</th>
               <th style={{ padding: '0.75rem', textAlign: 'left', fontWeight: 600 }}>Description</th>
-              <th style={{ padding: '0.75rem', textAlign: 'left', fontWeight: 600 }}>SKU</th>
               <th style={{ padding: '0.75rem', textAlign: 'left', fontWeight: 600 }}>Internal Code</th>
+              <th style={{ padding: '0.75rem', textAlign: 'left', fontWeight: 600 }}>SKU</th>
               <th style={{ padding: '0.75rem', textAlign: 'left', fontWeight: 600 }}>Category</th>
               <th style={{ padding: '0.75rem', textAlign: 'right', fontWeight: 600 }}>Quantity</th>
+              <th style={{ padding: '0.75rem', textAlign: 'right', fontWeight: 600 }}>Ask Price</th>
               <th style={{ padding: '0.75rem', textAlign: 'right', fontWeight: 600 }}>Unit Price</th>
               <th style={{ padding: '0.75rem', textAlign: 'right', fontWeight: 600 }}>Total Price</th>
+              <th style={{ padding: '0.75rem', textAlign: 'center', fontWeight: 600 }}>Approval</th>
               {editable && <th style={{ padding: '0.75rem', textAlign: 'center', fontWeight: 600 }}>Actions</th>}
             </tr>
           </thead>
           <tbody>
             {items.map((item, idx) => [
               <tr key={idx} style={{ background: highlightNew === idx ? '#fef9c3' : 'white', transition: 'background 0.3s' }}>
+                <td style={{ padding: '0.75rem', borderBottom: '1px solid #e5e7eb', textAlign: 'center' }}>
+                  {/* Env icon */}
+                  <span title={item.env} style={{
+                    display: 'inline-block',
+                    width: 18, height: 18, borderRadius: '50%',
+                    background: item.env === 'PROD' ? '#F44336' : item.env === 'DEV' ? '#4CAF50' : item.env === 'UAT' ? '#2196F3' : item.env === 'STAGE' ? '#FF9800' : '#9C27B0',
+                    border: '2px solid #e5e7eb',
+                  }} />
+                </td>
                 <td style={{ padding: '0.75rem', borderBottom: '1px solid #e5e7eb' }}>{item.description}</td>
-                <td style={{ padding: '0.75rem', borderBottom: '1px solid #e5e7eb' }}>{item.sku}</td>
                 <td style={{ padding: '0.75rem', borderBottom: '1px solid #e5e7eb' }}>{item.internalCode}</td>
+                <td style={{ padding: '0.75rem', borderBottom: '1px solid #e5e7eb' }}>{item.sku || DEFAULT_SKU[item.category?.toUpperCase()] || ''}</td>
                 <td style={{ padding: '0.75rem', borderBottom: '1px solid #e5e7eb' }}>{item.category}</td>
                 <td style={{ padding: '0.75rem', borderBottom: '1px solid #e5e7eb', textAlign: 'right' }}>{item.quantity}</td>
+                <td style={{ padding: '0.75rem', borderBottom: '1px solid #e5e7eb', textAlign: 'right' }}>
+                  {editingIndex === idx ? (
+                    <input type="number" value={editValues.askPrice} onChange={e => handleEditChange('askPrice', e.target.value)} />
+                  ) : (
+                    item.askPrice !== undefined ? `₹${item.askPrice}` : `₹${item.unitPrice}`
+                  )}
+                </td>
                 <td style={{ padding: '0.75rem', borderBottom: '1px solid #e5e7eb', textAlign: 'right' }}>₹{item.unitPrice?.toLocaleString()}</td>
                 <td style={{ padding: '0.75rem', borderBottom: '1px solid #e5e7eb', textAlign: 'right' }}>₹{item.totalPrice?.toLocaleString()}</td>
+                <td style={{ padding: '0.75rem', borderBottom: '1px solid #e5e7eb', textAlign: 'center' }}>
+                  {item.requiresApproval && (
+                    <Tooltip content="Finance Admin Approval Required">
+                      <span style={{ color: '#F44336', fontWeight: 700, fontSize: 18 }} title="Finance Admin Approval Required">!</span>
+                    </Tooltip>
+                  )}
+                  {item.requiresApproval && (
+                    <div style={{ color: '#b91c1c', fontSize: 12, marginTop: 2 }}>Pending: Finance</div>
+                  )}
+                </td>
                 {editable && (
                   <td style={{ padding: '0.75rem', borderBottom: '1px solid #e5e7eb', textAlign: 'center' }}>
-                    <button onClick={() => { setEditingIndex(idx); setEditValues(item); setExpandedIndex(idx); }} style={{ background: '#2563eb', color: 'white', border: 'none', borderRadius: 4, padding: '0.25rem 0.75rem', cursor: 'pointer', fontWeight: 500 }}>Edit</button>
+                    {isRowEditable(item) ? (
+                      <button onClick={() => { startEdit(idx); }} style={{ background: '#2563eb', color: 'white', border: 'none', borderRadius: 4, padding: '0.25rem 0.75rem', fontWeight: 500, cursor: 'pointer' }}>Edit</button>
+                    ) : (
+                      <button disabled style={{ background: '#e5e7eb', color: '#9ca3af', border: 'none', borderRadius: 4, padding: '0.25rem 0.75rem', fontWeight: 500, cursor: 'not-allowed', opacity: 0.7 }}>Edit</button>
+                    )}
                   </td>
                 )}
               </tr>,
-              expandedIndex === idx && editingIndex === idx ? renderExpandedRow(item, idx) : null
+              expandedIndex === idx && editingIndex === idx ? (
+                <tr>
+                  <td colSpan={editable ? 10 : 9} style={{ background: '#f9fafb', padding: 0 }}>
+                    <div style={{ maxWidth: 900, margin: '2rem auto', background: '#fff', borderRadius: 16, boxShadow: '0 2px 16px rgba(0,0,0,0.07)', padding: '2rem 2.5rem', display: 'flex', flexDirection: 'column', gap: 32 }}>
+                      <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 8, letterSpacing: 0.5 }}>{item.category} Configuration</div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-4">
+                        {renderConfigFields(item.category, item.sku, configState, handleEditChange)}
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                        <div>
+                          <label className="block text-xs font-semibold mb-1 text-gray-600">SKU</label>
+                          <input type="text" value={editValues.sku || ''} disabled className="w-full border rounded px-2 py-1 bg-gray-100 text-sm" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold mb-1 text-gray-600">Quantity</label>
+                          <input type="number" value={editValues.quantity} min={1} onChange={e => handleEditChange('quantity', e.target.value)} className="w-full border rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-200" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold mb-1 text-gray-600">Unit Price</label>
+                          <input type="number" value={editValues.unitPrice} disabled className="w-full border rounded px-2 py-1 bg-gray-100 text-sm" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold mb-1 text-gray-600">Ask Price</label>
+                          <input type="number" value={editValues.askPrice} onChange={e => handleEditChange('askPrice', e.target.value)} className="w-full border rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-200" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold mb-1 text-gray-600">Total Price</label>
+                          <input type="number" value={editValues.totalPrice} disabled className="w-full border rounded px-2 py-1 bg-gray-100 text-sm" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold mb-1 text-gray-600">Internal Code</label>
+                          <input type="text" value={editValues.internalCode} disabled className="w-full border rounded px-2 py-1 bg-gray-100 text-sm" />
+                        </div>
+                        <div className="col-span-2 md:col-span-4">
+                          <label className="block text-xs font-semibold mb-1 text-gray-600">Description</label>
+                          <input type="text" value={editValues.description} disabled className="w-full border rounded px-2 py-1 bg-gray-100 text-sm" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold mb-1 text-gray-600">Environment</label>
+                          <span title={editValues.env} style={{ display: 'inline-block', width: 18, height: 18, borderRadius: '50%', background: editValues.env === 'PROD' ? '#F44336' : editValues.env === 'DEV' ? '#4CAF50' : editValues.env === 'UAT' ? '#2196F3' : editValues.env === 'STAGE' ? '#FF9800' : '#9C27B0', border: '2px solid #e5e7eb', marginRight: 6, verticalAlign: 'middle' }} />
+                          <select value={editValues.env || 'PROD'} onChange={e => handleEditChange('env', e.target.value)} className="w-full border rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-200" style={{ width: 120 }}>
+                            {ENV_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                          </select>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+                        <button onClick={() => saveEdit(idx)} style={{ background: '#2563eb', color: 'white', border: 'none', borderRadius: 6, padding: '0.5rem 1.5rem', fontWeight: 600, fontSize: 15, display: 'flex', alignItems: 'center', gap: 8, boxShadow: '0 1px 4px rgba(37,99,235,0.08)', transition: 'background 0.2s' }}>
+                          <span style={{ fontSize: 18, verticalAlign: 'middle' }}>✓</span> Save
+                        </button>
+                        <button onClick={() => setEditingIndex(null)} style={{ background: '#f3f4f6', color: '#374151', border: 'none', borderRadius: 6, padding: '0.5rem 1.5rem', fontWeight: 500, fontSize: 15, display: 'flex', alignItems: 'center', gap: 8, boxShadow: '0 1px 4px rgba(55,65,81,0.06)', transition: 'background 0.2s' }}>
+                          <span style={{ fontSize: 18, verticalAlign: 'middle' }}>×</span> Cancel
+                        </button>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              ) : null
             ])}
             {adding && (
               <tr style={{ background: '#e0f2fe' }}>
@@ -964,10 +753,15 @@ const BoQTable = ({ items, setItems, editable, highlightNew, onAddResource, onEd
                   <input type='number' value={addValues.quantity} onChange={e => handleAddChange('quantity', e.target.value)} style={{ width: 60 }} />
                 </td>
                 <td style={{ padding: '0.75rem', textAlign: 'right' }}>
-                  <input type='number' value={addValues.unitPrice} onChange={e => handleAddChange('unitPrice', e.target.value)} style={{ width: 100 }} />
+                  <input type='number' value={addValues.askPrice} onChange={e => handleAddChange('askPrice', e.target.value)} style={{ width: 100 }} />
                 </td>
                 <td style={{ padding: '0.75rem', textAlign: 'right' }}>
                   ₹{(addValues.quantity && addValues.unitPrice ? (addValues.quantity * addValues.unitPrice).toLocaleString() : '0')}
+                </td>
+                <td style={{ padding: '0.75rem' }}>
+                  <select value={addValues.env || 'PROD'} onChange={e => handleAddChange('env', e.target.value)} style={{ width: '100%' }}>
+                    {ENV_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                  </select>
                 </td>
                 <td style={{ padding: '0.75rem', textAlign: 'center' }}>
                   <button onClick={saveAdd} style={{ background: '#2563eb', color: 'white', border: 'none', borderRadius: 4, padding: '0.25rem 0.75rem', marginRight: 4 }}>Add</button>
@@ -987,4 +781,5 @@ const BoQTable = ({ items, setItems, editable, highlightNew, onAddResource, onEd
   )
 }
 
-export default BoQTable 
+export default BoQTable
+export { getInternalCode, getFloorPriceForItem }; 

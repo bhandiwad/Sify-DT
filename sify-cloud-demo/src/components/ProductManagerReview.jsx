@@ -27,6 +27,7 @@ import {
   getProject, 
   updateProject, 
   getCurrentPersona,
+  setCurrentPersona,
   getNextStatus,
   canUserActOnProject,
   PERSONAS,
@@ -34,8 +35,33 @@ import {
   FLOW_TYPES,
   PRICE_BOOK_SKUS
 } from '@/utils/dataModel'
-import { CATALOG, VM_OS_OPTIONS, VM_FEATURES, FLOOR_UNIT_PRICES } from './BoQGenerated'
-import BoQTable from './BoQTable'
+import { CATALOG, VM_OS_OPTIONS, VM_FEATURES, FLOOR_UNIT_PRICES } from '../utils/constants'
+import BoQTable, { getInternalCode, getFloorPriceForItem } from './BoQTable'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
+import { ScrollArea } from './ui/scroll-area'
+import { ENVIRONMENT_TYPES } from '../utils/serviceModel'
+import { normalizeBoqItem } from '../utils/serviceModel'
+
+// Mock pricing data - in production, this would come from a pricing service
+const MOCK_PRICING = {
+  "VM-BASIC": { base: 5000, unit: "per vCPU" },
+  "VM-GPU": { base: 25000, unit: "per GPU" },
+  "CONTAINER": { base: 8000, unit: "per node" },
+  "BLOCK-SSD": { base: 2, unit: "per GB" },
+  "OBJ-STD": { base: 1, unit: "per GB" },
+  "FILE-NFS": { base: 3, unit: "per GB" },
+  "DBAAS-MYSQL": { base: 15000, unit: "per instance" },
+  "DBAAS-PGSQL": { base: 15000, unit: "per instance" },
+  "REDIS-CACHE": { base: 10000, unit: "per instance" },
+  "APP-HOSTING": { base: 12000, unit: "per app" },
+  "KAFKA-STREAM": { base: 20000, unit: "per cluster" },
+  "LB-STD": { base: 5000, unit: "per instance" },
+  "VPN-S2S": { base: 8000, unit: "per connection" },
+  "WAF": { base: 12000, unit: "per instance" },
+  "CERT-MGT": { base: 2000, unit: "per certificate" },
+  "KEY-VAULT": { base: 5000, unit: "per vault" },
+  "IAM": { base: 3000, unit: "per user" }
+};
 
 // Helper to extract vCPU and RAM from description (e.g., '4 vCPU, 16GB RAM')
 function extractVMConfig(description) {
@@ -56,23 +82,6 @@ function parseVmConfigFromDescription(description) {
     features: []
   }
 }
-function getInternalCode(item) {
-  if (item.category === 'Compute' && item.vmConfig) {
-    const { vcpu, ram, storage, os, features } = item.vmConfig
-    const osTag = os ? `-${os.split('-')[0].toUpperCase()}` : ''
-    const featTag = features && features.length ? '-' + features.map(f => f.split('-')[0].toUpperCase()).join('') : ''
-    return `CI-${vcpu}C${ram}R${storage}S${osTag}${featTag}`
-  }
-  if (item.category === 'Storage' && item.storageConfig) {
-    const { size, iops, type } = item.storageConfig
-    return `ST-${size}G-${type?.toUpperCase() || 'SSD'}-I${iops >= 1000 ? Math.round(iops/1000)+'K' : iops}`
-  }
-  if (item.category === 'Network' && item.networkConfig) {
-    const { bandwidth, staticIp, firewall } = item.networkConfig
-    return `NW-${bandwidth}M${staticIp ? '-SIP' : ''}${firewall ? '-FW' : ''}`
-  }
-  return item.internalCode
-}
 
 const ProductManagerReview = () => {
   const location = useLocation()
@@ -80,48 +89,85 @@ const ProductManagerReview = () => {
   
   const [projectData, setProjectData] = useState(null)
   const [matchResults, setMatchResults] = useState(null)
-  const [currentPersona, setCurrentPersona] = useState(getCurrentPersona())
+  const [currentPersona, setCurrentPersonaState] = useState(getCurrentPersona())
   const [comments, setComments] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState(null)
   const [customSkuPricing, setCustomSkuPricing] = useState({})
   const [newlyAddedIndex, setNewlyAddedIndex] = useState(null)
+  const { environments = {} } = location.state || {}
 
+  const [pricing, setPricing] = useState(() => {
+    const initial = {}
+    if (environments && typeof environments === 'object') {
+      Object.entries(environments).forEach(([envKey, env]) => {
+        initial[envKey] = {}
+        if (env && Array.isArray(env.services)) {
+          env.services.forEach(service => {
+            initial[envKey][service.sku] = {
+              basePrice: MOCK_PRICING[service.sku]?.base || 0,
+              quantity: 1,
+              discount: 0
+            }
+          })
+        }
+      })
+    }
+    return initial
+  })
+
+  // Always set persona to PM on mount
   useEffect(() => {
-    initializeComponent()
+    setCurrentPersona(PERSONAS.PRODUCT_MANAGER);
+    setCurrentPersonaState(PERSONAS.PRODUCT_MANAGER);
+    console.log('[Auto Persona Switch] Set persona to Product Manager');
+    initializeComponent();
   }, [location])
 
   const initializeComponent = () => {
-    try {
-      const projectId = location.state?.projectId
-      
-      if (projectId) {
-        const project = getProject(projectId)
-        if (project) {
-          setProjectData(project)
-          const matched = project.matchedItems || [];
-          const unmatched = project.unmatchedItems || [];
-          setMatchResults({ matched, unmatched })
-          
-          // Initialize custom SKU pricing
-          const initialPricing = {}
-          project.unmatchedItems?.forEach((item, index) => {
-            initialPricing[index] = {
-              basePrice: 5000, // Default price
-              unit: 'per month',
-              leadTime: '2-3 weeks'
-            }
-          })
-          setCustomSkuPricing(initialPricing)
-        } else {
-          setError('Project not found')
-        }
-      } else {
-        setError('No project ID provided')
+    let projectId = location.state?.projectId;
+    if (!projectId) {
+      // Try URL params
+      const params = new URLSearchParams(window.location.search);
+      projectId = params.get('projectId');
+    }
+    if (!projectId) {
+      // Try localStorage currentProject
+      const currentProject = localStorage.getItem('currentProject');
+      if (currentProject) {
+        try {
+          const parsed = JSON.parse(currentProject);
+          projectId = parsed.id;
+        } catch (e) { /* ignore */ }
       }
-    } catch (err) {
-      console.error('Error initializing:', err)
-      setError('Failed to load project data')
+    }
+    if (!projectId) {
+      setError('No project ID provided');
+      console.error('[PM Review] No project ID found');
+      return;
+    }
+    console.log('[PM Review] Loading project with ID:', projectId);
+    const project = getProject(projectId);
+    if (project) {
+      setProjectData(project);
+      setCurrentPersona(PERSONAS.PRODUCT_MANAGER);
+      setCurrentPersonaState(PERSONAS.PRODUCT_MANAGER);
+      const matched = project.matchedItems || [];
+      const unmatched = project.unmatchedItems || [];
+      setMatchResults({ matched, unmatched });
+      // Initialize custom SKU pricing
+      const initialPricing = {};
+      project.unmatchedItems?.forEach((item, index) => {
+        initialPricing[index] = {
+          basePrice: 5000, // Default price
+          unit: 'per month',
+          leadTime: '2-3 weeks'
+        }
+      });
+      setCustomSkuPricing(initialPricing);
+    } else {
+      setError('Project not found');
+      console.error('[PM Review] Project not found for ID:', projectId);
     }
   }
 
@@ -152,7 +198,7 @@ const ProductManagerReview = () => {
         ...item,
         customSku: {
           sku: `CUSTOM-${projectData.id}-${String(index + 1).padStart(3, '0')}`,
-          internalCode: item.suggestedInternalCode,
+          internalCode: getInternalCode(item),
           name: item.description,
           category: 'Custom',
           basePrice: customSkuPricing[index]?.basePrice || 5000,
@@ -256,6 +302,58 @@ const ProductManagerReview = () => {
     }))
   }
 
+  const calculateTotals = () => {
+    const totals = {
+      subtotal: 0,
+      discount: 0,
+      tax: 0,
+      total: 0
+    }
+
+    Object.entries(environments).forEach(([envKey, env]) => {
+      const scalingFactor = env.scalingFactor
+      env.services.forEach(service => {
+        const servicePrice = pricing[envKey][service.sku]
+        const lineTotal = servicePrice.basePrice * servicePrice.quantity * scalingFactor
+        const lineDiscount = lineTotal * (servicePrice.discount / 100)
+        
+        totals.subtotal += lineTotal
+        totals.discount += lineDiscount
+      })
+    })
+
+    totals.tax = (totals.subtotal - totals.discount) * 0.18 // 18% GST
+    totals.total = totals.subtotal - totals.discount + totals.tax
+
+    return totals
+  }
+
+  const handlePriceChange = (envKey, sku, field, value) => {
+    setPricing(prev => ({
+      ...prev,
+      [envKey]: {
+        ...prev[envKey],
+        [sku]: {
+          ...prev[envKey][sku],
+          [field]: parseFloat(value) || 0
+        }
+      }
+    }))
+  }
+
+  const handleSubmit = () => {
+    navigate('/solution-architect-vetting', {
+      state: {
+        projectData,
+        environments,
+        pricing,
+        totals: calculateTotals()
+      }
+    })
+  }
+
+  const totals = calculateTotals()
+
   if (error) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -291,7 +389,7 @@ const ProductManagerReview = () => {
   const canAct = canUserActOnProject(currentPersona, projectData.status)
 
   // Merge matched and unmatched for the table
-  const allBoqItems = [...(matchResults?.matched || []), ...(matchResults?.unmatched || [])]
+  const allBoqItems = [...(matchResults?.matched || []), ...(matchResults?.unmatched || [])].map(normalizeBoqItem)
   const setAllBoqItems = (newItems) => {
     // Optionally, split back into matched/unmatched if needed for workflow logic
     // For now, just update matchResults in-place for UI
@@ -401,11 +499,37 @@ const ProductManagerReview = () => {
         <BoQTable
           items={allBoqItems}
           setItems={setAllBoqItems}
-          editable={canAct}
+          editable={currentPersona === 'PM' && projectData?.status === 'Pending Product Manager Review'}
+          allowCustomSKU={true}
+          restrictEditToCustomSkus={(() => { 
+            const val = currentPersona === 'PM' && projectData?.status === 'Pending Product Manager Review';
+            console.log('[BoQTable] PM restrictEditToCustomSkus:', { currentPersona, status: projectData?.status, restrict: val });
+            return val;
+          })()}
           highlightNew={newlyAddedIndex}
           onAddResource={handleAddResource}
           onEditResource={handleEditResource}
         />
+
+        {currentPersona === 'PM' && projectData?.status === 'Pending Product Manager Review' && (
+          <div className="flex justify-end gap-4 mt-6">
+            <Button
+              onClick={() => {
+                // Update project status and navigate
+                const updatedProject = { ...projectData, status: 'Pending Solution Architect Final Review', boqItems: allBoqItems };
+                localStorage.setItem('currentProject', JSON.stringify(updatedProject));
+                navigate('/solution-architect-vetting', { state: { projectId: updatedProject.id, currentPersona: 'SA', isFinalReview: true } });
+              }}
+              style={{ background: '#2563eb', color: 'white', fontWeight: 600, fontSize: 16, borderRadius: 8 }}
+            >
+              Approve & Forward to SA Final Review
+            </Button>
+          </div>
+        )}
+
+        <div className="mt-6">
+          <Button onClick={handleSubmit}>Submit for Solution Architect Review</Button>
+        </div>
       </div>
     </div>
   )

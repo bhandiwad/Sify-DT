@@ -9,6 +9,7 @@ import ProductManagerReview from './components/ProductManagerReview'
 import SolutionArchitectVetting from './components/SolutionArchitectVetting'
 import BoQGenerated from './components/BoQGenerated'
 import ProposalGenerated from './components/ProposalGenerated'
+import ManualEntryWorkspace from './components/ManualEntryWorkspace'
 import './App.css'
 
 function App() {
@@ -26,6 +27,7 @@ function App() {
             <Route path="/solution-architect-vetting" element={<SolutionArchitectVetting />} />
             <Route path="/boq-generated" element={<BoQGenerated />} />
             <Route path="/proposal-generated" element={<ProposalGenerated />} />
+            <Route path="/manual-entry" element={<ManualEntryWorkspace />} />
             {/* Catch all route */}
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>

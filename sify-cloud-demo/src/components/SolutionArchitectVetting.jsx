@@ -29,18 +29,23 @@ import {
   PROJECT_STATUS,
   FLOW_TYPES
 } from '@/utils/dataModel'
-import { CATALOG, VM_OS_OPTIONS, VM_FEATURES, FLOOR_UNIT_PRICES } from './BoQGenerated'
-import BoQTable from './BoQTable'
+import { CATALOG, VM_OS_OPTIONS, VM_FEATURES, FLOOR_UNIT_PRICES } from '../utils/constants'
+import BoQTable, { getInternalCode, getFloorPriceForItem } from './BoQTable'
+import { normalizeBoqItem } from '../utils/serviceModel'
 
 // Helper to extract vCPU and RAM from description (e.g., '4 vCPU, 16GB RAM')
 function extractVMConfig(description) {
   const vcpuMatch = description.match(/(\d+)\s*vCPU/i)
   const ramMatch = description.match(/(\d+)\s*GB/i)
   return {
-    vcpu: vcpuMatch ? parseInt(vcpuMatch[1]) : 0,
-    ram: ramMatch ? parseInt(ramMatch[1]) : 0
+    vcpu: vcpuMatch ? parseInt(vcpuMatch[1]) : 2,
+    ram: ramMatch ? parseInt(ramMatch[1]) : 4,
+    storage: 50,
+    os: 'windows-2022',
+    features: []
   }
 }
+
 function parseVmConfigFromDescription(description) {
   const { vcpu, ram } = extractVMConfig(description)
   return {
@@ -51,22 +56,22 @@ function parseVmConfigFromDescription(description) {
     features: []
   }
 }
-function getInternalCode(item) {
-  if (item.category === 'Compute' && item.vmConfig) {
-    const { vcpu, ram, storage, os, features } = item.vmConfig
-    const osTag = os ? `-${os.split('-')[0].toUpperCase()}` : ''
-    const featTag = features && features.length ? '-' + features.map(f => f.split('-')[0].toUpperCase()).join('') : ''
-    return `CI-${vcpu}C${ram}R${storage}S${osTag}${featTag}`
-  }
-  if (item.category === 'Storage' && item.storageConfig) {
-    const { size, iops, type } = item.storageConfig
-    return `ST-${size}G-${type?.toUpperCase() || 'SSD'}-I${iops >= 1000 ? Math.round(iops/1000)+'K' : iops}`
-  }
-  if (item.category === 'Network' && item.networkConfig) {
-    const { bandwidth, staticIp, firewall } = item.networkConfig
-    return `NW-${bandwidth}M${staticIp ? '-SIP' : ''}${firewall ? '-FW' : ''}`
-  }
-  return item.internalCode
+
+function extractNetworkConfig(description) {
+  const bandwidthMatch = description.match(/(\d+)\s*Mbps/i);
+  return {
+    bandwidth: bandwidthMatch ? parseInt(bandwidthMatch[1]) : 100,
+    staticIp: /static ip/i.test(description),
+    firewall: /firewall/i.test(description)
+  };
+}
+
+function extractBackupConfig(description) {
+  return { type: /standard/i.test(description) ? 'Standard' : 'Other' };
+}
+
+function extractVpnConfig(description) {
+  return { type: /site-to-site/i.test(description) ? 'Site-to-Site' : 'Other' };
 }
 
 const SolutionArchitectVetting = () => {
@@ -75,42 +80,16 @@ const SolutionArchitectVetting = () => {
   
   const [projectData, setProjectData] = useState(null)
   const [matchResults, setMatchResults] = useState(null)
-  const [currentPersona, setCurrentPersona] = useState(getCurrentPersona())
+  const [currentPersona, setCurrentPersona] = useState(() => {
+    // Initialize from navigation state if available, otherwise use getCurrentPersona
+    return location.state?.currentPersona || getCurrentPersona()
+  })
   const [comments, setComments] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState(null)
   const [isFinalReview, setIsFinalReview] = useState(false)
   const [boqItems, setBoqItems] = useState([])
   const [newlyAddedIndex, setNewlyAddedIndex] = useState(null)
-
-  useEffect(() => {
-    initializeComponent()
-  }, [location])
-
-  const initializeComponent = () => {
-    try {
-      const projectId = location.state?.projectId
-      const isFinal = location.state?.isFinalReview || false
-      setIsFinalReview(isFinal)
-      if (projectId) {
-        const project = getProject(projectId)
-        if (project) {
-          setProjectData(project)
-          const matched = project.matchedItems || [];
-          const unmatched = project.unmatchedItems || [];
-          setMatchResults({ matched, unmatched })
-          setBoqItems([...matched, ...unmatched])
-        } else {
-          setError('Project not found')
-        }
-      } else {
-        setError('No project ID provided')
-      }
-    } catch (err) {
-      console.error('Error initializing:', err)
-      setError('Failed to load project data')
-    }
-  }
 
   const handlePersonaChange = (persona) => {
     setCurrentPersona(persona)
@@ -134,8 +113,23 @@ const SolutionArchitectVetting = () => {
         nextStatus = PROJECT_STATUS.PENDING_PM_REVIEW
       }
 
+      // Update BoQ items with proper internal codes and prices
+      const updatedBoqItems = boqItems.map(item => {
+        const computed = { ...item }
+        // Use imported getInternalCode
+        computed.internalCode = getInternalCode(computed)
+        // Use imported getFloorPriceForItem for price if needed
+        if (computed.askPrice === undefined) {
+          computed.askPrice = getFloorPriceForItem(computed)
+        }
+        // Update total price
+        computed.totalPrice = computed.quantity * computed.unitPrice
+        return computed
+      })
+
       const updatedProject = updateProject(projectData.id, {
         status: nextStatus,
+        boqItems: updatedBoqItems,
         comments: [...(projectData.comments || []), {
           author: currentPersona,
           text: comments || `Solution Architect ${isFinalReview ? 'final ' : ''}approval completed`,
@@ -226,6 +220,37 @@ const SolutionArchitectVetting = () => {
     const newItems = [...boqItems]
     newItems[index] = updatedItem
     setBoqItems(newItems)
+  }
+
+  useEffect(() => {
+    initializeComponent()
+  }, [location])
+
+  const initializeComponent = () => {
+    try {
+      const projectId = location.state?.projectId
+      const isFinal = location.state?.isFinalReview || false
+      setIsFinalReview(isFinal)
+      if (projectId) {
+        const project = getProject(projectId)
+        if (project) {
+          setProjectData(project)
+          const matched = project.matchedItems || [];
+          const unmatched = project.unmatchedItems || [];
+          // Normalize all items using shared utility
+          const allItems = [...matched, ...unmatched].map(normalizeBoqItem);
+          setMatchResults({ matched, unmatched })
+          setBoqItems(allItems)
+        } else {
+          setError('Project not found')
+        }
+      } else {
+        setError('No project ID provided')
+      }
+    } catch (err) {
+      console.error('Error initializing:', err)
+      setError('Failed to load project data')
+    }
   }
 
   if (error) {
@@ -373,14 +398,67 @@ const SolutionArchitectVetting = () => {
         )}
 
         {/* Unified BoQ Table for all items */}
-        <BoQTable
-          items={boqItems}
-          setItems={setBoqItems}
-          editable={canAct}
-          highlightNew={newlyAddedIndex}
-          onAddResource={handleAddResource}
-          onEditResource={handleEditResource}
-        />
+        <div className="mt-6">
+          <BoQTable
+            items={boqItems}
+            setItems={setBoqItems}
+            editable={currentPersona === 'SA' && projectData?.status === 'Pending Solution Architect Review'}
+            highlightNew={newlyAddedIndex}
+            onAddResource={handleAddResource}
+            onEditResource={handleEditResource}
+            persona={currentPersona}
+            workflow={isFinalReview ? 'final' : 'initial'}
+            allowCustomSKU={true}
+          />
+        </div>
+
+        {currentPersona === 'SA' && projectData?.status === 'Pending Solution Architect Final Review' && (
+          <div className="flex justify-end gap-4 mt-6">
+            <Button
+              onClick={() => {
+                // Debug logs
+                console.log('[SA->Finance] projectData before update:', projectData);
+                console.log('[SA->Finance] boqItems before update:', boqItems);
+                const clonedBoqItems = JSON.parse(JSON.stringify(boqItems));
+                console.log('[SA->Finance] clonedBoqItems before update:', clonedBoqItems);
+                // Update project status and persist to main projects list
+                const updatedProject = updateProject(projectData.id, {
+                  status: PROJECT_STATUS.PENDING_FINANCE_APPROVAL,
+                  boqItems: clonedBoqItems,
+                  lastModified: new Date().toISOString()
+                });
+                console.log('[SA->Finance] updatedProject after update:', updatedProject);
+                localStorage.setItem('currentProject', JSON.stringify(updatedProject));
+                navigate('/boq-generated', { state: { projectId: updatedProject.id, currentPersona: 'Finance' } });
+              }}
+              style={{ background: '#2563eb', color: 'white', fontWeight: 600, fontSize: 16, borderRadius: 8 }}
+            >
+              Approve & Forward to Finance
+            </Button>
+          </div>
+        )}
+
+        {currentPersona === 'SA' && projectData?.status === 'Pending Solution Architect Review' && (
+          <div className="flex justify-end gap-4 mt-6">
+            <Button
+              onClick={async () => {
+                // Update project status and save to storage
+                const updatedProject = updateProject(projectData.id, {
+                  status: PROJECT_STATUS.PENDING_PM_REVIEW,
+                  boqItems,
+                  lastModified: new Date().toISOString()
+                });
+                localStorage.setItem('currentProject', JSON.stringify(updatedProject));
+                setCurrentPersona(PERSONAS.PRODUCT_MANAGER);
+                console.log('[SA->PM] Updated project status to Pending Product Manager Review and set persona to PM');
+                navigate('/product-manager-review', { state: { projectId: updatedProject.id, currentPersona: 'PM' } });
+              }}
+              style={{ background: '#2563eb', color: 'white', fontWeight: 600, fontSize: 16, borderRadius: 8 }}
+            >
+              Approve & Forward to PM
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   )

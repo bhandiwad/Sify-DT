@@ -17,7 +17,9 @@ import {
   Shield,
   Calendar,
   TrendingDown,
-  Info
+  Info,
+  Globe,
+  Lock
 } from 'lucide-react'
 
 const VMConfiguration = () => {
@@ -34,7 +36,13 @@ const VMConfiguration = () => {
       storage: { ssd: 100, hdd: 0 },
       os: 'windows-2022',
       features: ['antivirus', 'backup'],
-      riTerm: 'monthly'
+      riTerm: 'monthly',
+      network: {
+        publicIp: false,
+        firewall: true,
+        inboundRules: [],
+        outboundRules: []
+      }
     },
     'app-server-02': {
       name: 'App-Server-02',
@@ -75,7 +83,13 @@ const VMConfiguration = () => {
       storage: { ssd: 50, hdd: 0 },
       os: 'windows-2022',
       features: ['antivirus'],
-      riTerm: 'monthly'
+      riTerm: 'monthly',
+      network: {
+        publicIp: false,
+        firewall: true,
+        inboundRules: [],
+        outboundRules: []
+      }
     }
     
     setVmConfigs(prev => ({
@@ -83,6 +97,28 @@ const VMConfiguration = () => {
       [newVMId]: newVM
     }))
     setSelectedVM(newVMId)
+  }
+
+  const addMultipleVMs = (count, template) => {
+    const currentCount = Object.keys(vmConfigs).length
+    const newConfigs = { ...vmConfigs }
+    
+    for (let i = 0; i < count; i++) {
+      const newVMId = `new-vm-${currentCount + i + 1}`
+      newConfigs[newVMId] = {
+        ...template,
+        name: `${template.name}-${i + 1}`,
+        network: {
+          publicIp: false,
+          firewall: true,
+          inboundRules: [],
+          outboundRules: []
+        }
+      }
+    }
+    
+    setVmConfigs(newConfigs)
+    setSelectedVM(Object.keys(newConfigs)[Object.keys(newConfigs).length - 1])
   }
 
   const removeVM = (vmId) => {
@@ -197,7 +233,13 @@ const VMConfiguration = () => {
         storage: { ssd: 100, hdd: 0 },
         os: 'windows-2022',
         features: ['antivirus', 'backup'],
-        riTerm: 'monthly'
+        riTerm: 'monthly',
+        network: {
+          publicIp: false,
+          firewall: true,
+          inboundRules: [],
+          outboundRules: []
+        }
       },
       'app-server-02': {
         name: 'App-Server-02',
@@ -285,106 +327,98 @@ const VMConfiguration = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
-                {Object.entries(vmConfigs).map(([vmId, config]) => {
-                  const cost = calculateVMCost(config)
-                  return (
-                    <Card 
+                {/* VM List */}
+                <div className="space-y-2">
+                  {Object.entries(vmConfigs).map(([vmId, config]) => (
+                    <div
                       key={vmId}
-                      className={`cursor-pointer transition-colors ${
-                        selectedVM === vmId ? 'border-blue-500 bg-blue-50' : 'hover:bg-gray-50'
+                      className={`flex items-center justify-between p-2 rounded cursor-pointer ${
+                        selectedVM === vmId ? 'bg-primary/10' : 'hover:bg-gray-100'
                       }`}
                       onClick={() => setSelectedVM(vmId)}
                     >
-                      <CardContent className="p-3">
-                        <div className="flex items-center justify-between mb-2">
-                          <h4 className="font-medium text-sm">{config.name}</h4>
-                          <div className="flex items-center space-x-1">
-                            <Badge variant="outline" className="text-xs">
-                              {riDiscounts[config.riTerm]?.label.split(' ')[0]}
-                            </Badge>
-                            {Object.keys(vmConfigs).length > 1 && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  removeVM(vmId)
-                                }}
-                                className="h-6 w-6 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
-                              >
-                                ×
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                        <p className="text-xs text-gray-600">
-                          {config.cpu}vCPU • {config.ram}GB RAM
-                        </p>
-                        <p className="text-xs font-medium text-blue-600 mt-1">
-                          ₹{Math.round(cost.discounted).toLocaleString()}/mo
-                        </p>
-                        {cost.savings > 0 && (
-                          <p className="text-xs text-green-600">
-                            Save ₹{Math.round(cost.savings).toLocaleString()}/mo
-                          </p>
-                        )}
-                      </CardContent>
-                    </Card>
-                  )
-                })}
-                
-                {/* Quick Add Templates */}
+                      <div className="flex items-center">
+                        <Server className="h-4 w-4 mr-2" />
+                        <span className="text-sm">{config.name}</span>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          removeVM(vmId)
+                        }}
+                      >
+                        ×
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Bulk VM Addition */}
                 <div className="mt-4 pt-4 border-t">
-                  <p className="text-xs font-medium text-gray-700 mb-2">Quick Add Templates:</p>
-                  <div className="space-y-1">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        const vmCount = Object.keys(vmConfigs).length + 1
-                        const newVMId = `web-server-${vmCount}`
-                        setVmConfigs(prev => ({
-                          ...prev,
-                          [newVMId]: {
-                            name: `Web-Server-${vmCount}`,
+                  <Label className="text-sm font-medium mb-2">Quick Add Multiple VMs</Label>
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        min="1"
+                        max="10"
+                        defaultValue="3"
+                        className="w-20"
+                        id="webServerCount"
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          const count = parseInt(document.getElementById('webServerCount').value) || 1
+                          addMultipleVMs(count, {
+                            name: 'Web-Server',
                             cpu: 2,
                             ram: 4,
                             storage: { ssd: 50, hdd: 0 },
                             os: 'ubuntu',
                             features: ['antivirus'],
                             riTerm: 'monthly'
-                          }
-                        }))
-                        setSelectedVM(newVMId)
-                      }}
-                      className="w-full text-xs"
-                    >
-                      🌐 Web Server (2vCPU, 4GB)
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        const vmCount = Object.keys(vmConfigs).length + 1
-                        const newVMId = `db-server-${vmCount}`
-                        setVmConfigs(prev => ({
-                          ...prev,
-                          [newVMId]: {
-                            name: `DB-Server-${vmCount}`,
+                          })
+                        }}
+                        className="flex-1"
+                      >
+                        <Globe className="h-4 w-4 mr-2" />
+                        Add Web Servers
+                      </Button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        min="1"
+                        max="5"
+                        defaultValue="2"
+                        className="w-20"
+                        id="dbServerCount"
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          const count = parseInt(document.getElementById('dbServerCount').value) || 1
+                          addMultipleVMs(count, {
+                            name: 'DB-Server',
                             cpu: 8,
                             ram: 16,
                             storage: { ssd: 500, hdd: 0 },
                             os: 'windows-2022',
                             features: ['sql-server', 'antivirus', 'backup'],
                             riTerm: 'monthly'
-                          }
-                        }))
-                        setSelectedVM(newVMId)
-                      }}
-                      className="w-full text-xs"
-                    >
-                      🗄️ Database Server (8vCPU, 16GB)
-                    </Button>
+                          })
+                        }}
+                        className="flex-1"
+                      >
+                        <HardDrive className="h-4 w-4 mr-2" />
+                        Add DB Servers
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </CardContent>
@@ -433,9 +467,10 @@ const VMConfiguration = () => {
               </CardHeader>
               <CardContent>
                 <Tabs defaultValue="compute" className="w-full">
-                  <TabsList className="grid w-full grid-cols-4">
+                  <TabsList className="grid w-full grid-cols-5">
                     <TabsTrigger value="compute">Compute</TabsTrigger>
                     <TabsTrigger value="storage">Storage</TabsTrigger>
+                    <TabsTrigger value="network">Network</TabsTrigger>
                     <TabsTrigger value="software">Software</TabsTrigger>
                     <TabsTrigger value="reserved">Reserved Instance</TabsTrigger>
                   </TabsList>
@@ -587,6 +622,228 @@ const VMConfiguration = () => {
                         </div>
                       </div>
                     </div>
+                  </TabsContent>
+
+                  {/* Network Tab */}
+                  <TabsContent value="network" className="space-y-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {/* Public IP */}
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="text-sm flex items-center justify-between">
+                            <div className="flex items-center">
+                              <Globe className="h-4 w-4 mr-2" />
+                              Public IP Address
+                            </div>
+                            <Badge variant="outline">₹1000/month</Badge>
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="flex items-center justify-between">
+                            <Label>Enable Public IP</Label>
+                            <input
+                              type="checkbox"
+                              checked={currentConfig.network?.publicIp}
+                              onChange={(e) => updateVMConfig(selectedVM, 'network', {
+                                ...currentConfig.network,
+                                publicIp: e.target.checked
+                              })}
+                              className="h-4 w-4"
+                            />
+                          </div>
+                          <p className="text-sm text-gray-600 mt-2">
+                            Assign a public IP address to allow direct internet access
+                          </p>
+                        </CardContent>
+                      </Card>
+
+                      {/* Firewall */}
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="text-sm flex items-center justify-between">
+                            <div className="flex items-center">
+                              <Lock className="h-4 w-4 mr-2" />
+                              Firewall Protection
+                            </div>
+                            <Badge variant="outline">₹2000/month</Badge>
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="flex items-center justify-between">
+                            <Label>Enable Firewall</Label>
+                            <input
+                              type="checkbox"
+                              checked={currentConfig.network?.firewall}
+                              onChange={(e) => updateVMConfig(selectedVM, 'network', {
+                                ...currentConfig.network,
+                                firewall: e.target.checked
+                              })}
+                              className="h-4 w-4"
+                            />
+                          </div>
+                          <p className="text-sm text-gray-600 mt-2">
+                            Enable advanced firewall protection and traffic filtering
+                          </p>
+                        </CardContent>
+                      </Card>
+                    </div>
+
+                    {/* Firewall Rules */}
+                    {currentConfig.network?.firewall && (
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="text-sm">Firewall Rules</CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                          {/* Inbound Rules */}
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <Label>Inbound Rules</Label>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  const newRules = [...(currentConfig.network.inboundRules || []), {
+                                    port: '',
+                                    protocol: 'tcp',
+                                    source: ''
+                                  }]
+                                  updateVMConfig(selectedVM, 'network', {
+                                    ...currentConfig.network,
+                                    inboundRules: newRules
+                                  })
+                                }}
+                              >
+                                Add Rule
+                              </Button>
+                            </div>
+                            <div className="space-y-2">
+                              {currentConfig.network.inboundRules?.map((rule, idx) => (
+                                <div key={idx} className="flex gap-2 items-center">
+                                  <Input
+                                    placeholder="Port (e.g., 80, 443)"
+                                    value={rule.port}
+                                    onChange={(e) => {
+                                      const newRules = [...currentConfig.network.inboundRules]
+                                      newRules[idx] = { ...rule, port: e.target.value }
+                                      updateVMConfig(selectedVM, 'network', {
+                                        ...currentConfig.network,
+                                        inboundRules: newRules
+                                      })
+                                    }}
+                                    className="w-1/3"
+                                  />
+                                  <Select
+                                    value={rule.protocol}
+                                    onValueChange={(value) => {
+                                      const newRules = [...currentConfig.network.inboundRules]
+                                      newRules[idx] = { ...rule, protocol: value }
+                                      updateVMConfig(selectedVM, 'network', {
+                                        ...currentConfig.network,
+                                        inboundRules: newRules
+                                      })
+                                    }}
+                                  >
+                                    <SelectTrigger className="w-1/3">
+                                      <SelectValue placeholder="Protocol" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="tcp">TCP</SelectItem>
+                                      <SelectItem value="udp">UDP</SelectItem>
+                                      <SelectItem value="icmp">ICMP</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                  <Input
+                                    placeholder="Source (e.g., 0.0.0.0/0)"
+                                    value={rule.source}
+                                    onChange={(e) => {
+                                      const newRules = [...currentConfig.network.inboundRules]
+                                      newRules[idx] = { ...rule, source: e.target.value }
+                                      updateVMConfig(selectedVM, 'network', {
+                                        ...currentConfig.network,
+                                        inboundRules: newRules
+                                      })
+                                    }}
+                                    className="w-1/3"
+                                  />
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => {
+                                      const newRules = currentConfig.network.inboundRules.filter((_, i) => i !== idx)
+                                      updateVMConfig(selectedVM, 'network', {
+                                        ...currentConfig.network,
+                                        inboundRules: newRules
+                                      })
+                                    }}
+                                  >
+                                    ×
+                                  </Button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Common Presets */}
+                          <div className="pt-4 border-t">
+                            <Label className="mb-2">Quick Add Common Rules</Label>
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  const newRules = [...(currentConfig.network.inboundRules || []), {
+                                    port: '80,443',
+                                    protocol: 'tcp',
+                                    source: '0.0.0.0/0'
+                                  }]
+                                  updateVMConfig(selectedVM, 'network', {
+                                    ...currentConfig.network,
+                                    inboundRules: newRules
+                                  })
+                                }}
+                              >
+                                HTTP/HTTPS
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  const newRules = [...(currentConfig.network.inboundRules || []), {
+                                    port: '3389',
+                                    protocol: 'tcp',
+                                    source: '0.0.0.0/0'
+                                  }]
+                                  updateVMConfig(selectedVM, 'network', {
+                                    ...currentConfig.network,
+                                    inboundRules: newRules
+                                  })
+                                }}
+                              >
+                                RDP
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  const newRules = [...(currentConfig.network.inboundRules || []), {
+                                    port: '22',
+                                    protocol: 'tcp',
+                                    source: '0.0.0.0/0'
+                                  }]
+                                  updateVMConfig(selectedVM, 'network', {
+                                    ...currentConfig.network,
+                                    inboundRules: newRules
+                                  })
+                                }}
+                              >
+                                SSH
+                              </Button>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
                   </TabsContent>
 
                   {/* Software Tab */}

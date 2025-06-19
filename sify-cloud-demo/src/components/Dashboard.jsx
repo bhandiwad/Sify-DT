@@ -28,6 +28,7 @@ import {
   getProjects, 
   clearDemoData, 
   getCurrentPersona, 
+  setCurrentPersona,
   canUserActOnProject,
   getStatusColor,
   PROJECT_STATUS,
@@ -42,6 +43,8 @@ const Dashboard = () => {
   const navigate = useNavigate()
 
   useEffect(() => {
+    setCurrentPersona(PERSONAS.ACCOUNT_MANAGER);
+    setCurrentPersona(PERSONAS.ACCOUNT_MANAGER); // set in localStorage
     loadProjects()
   }, [])
 

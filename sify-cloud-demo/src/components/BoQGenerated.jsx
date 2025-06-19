@@ -1,8 +1,19 @@
-import React from 'react'
-import { PRICE_BOOK_SKUS } from '@/utils/dataModel'
-import { useLocation } from 'react-router-dom'
+import React, { useState, useEffect } from 'react'
+import { PRICE_BOOK_SKUS, getCurrentPersona, PERSONAS } from '@/utils/dataModel'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { getProject } from '@/utils/dataModel'
 import BoQTable from './BoQTable'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from './ui/card'
+import { Button } from './ui/button'
+import { ScrollArea } from './ui/scroll-area'
+import { ENVIRONMENT_TYPES, SERVICE_CATEGORIES, COMPLIANCE_REQUIREMENTS } from '../utils/serviceModel'
+import { Badge } from './ui/badge'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table'
+import { Download, ArrowLeft, Shield, Server, Database, ArrowRight } from 'lucide-react'
+import { normalizeBoqItem } from '../utils/serviceModel'
+import { CATALOG, FLOOR_UNIT_PRICES, VM_OS_OPTIONS, VM_FEATURES } from '../utils/constants'
+import { DEFAULT_SKU } from './BoQTable'
 
 const FLOOR_PRICES = {
   'CI-COMPUTE': 12000,
@@ -12,25 +23,6 @@ const FLOOR_PRICES = {
   'CI-BACKUP': 4000,
   'CI-VPN': 2000,
   'CI-INTERNET': 5000,
-}
-
-export const CATALOG = [
-  { label: 'Compute (VM)', sku: 'CI-COMPUTE', internalCode: 'CI-1VCPU-1GB+AddOn', category: 'Compute', unitPrice: 15000 },
-  { label: 'Storage', sku: 'CI-STORAGE', internalCode: 'CI-STORAGE-1GB+AddOn', category: 'Storage', unitPrice: 50 },
-  { label: 'Network', sku: 'CI-NETWORK', internalCode: 'CI-LB+AddOn', category: 'Network', unitPrice: 8000 },
-  { label: 'Security', sku: 'CI-SECURITY', internalCode: 'CI-FW+AddOn', category: 'Security', unitPrice: 12000 },
-  { label: 'Backup', sku: 'CI-BACKUP', internalCode: 'CI-BKP+AddOn', category: 'Backup', unitPrice: 5000 },
-  { label: 'VPN', sku: 'CI-VPN', internalCode: 'CI-VPN+AddOn', category: 'VPN', unitPrice: 3000 },
-  { label: 'Internet', sku: 'CI-INTERNET', internalCode: 'CI-INET+AddOn', category: 'Internet', unitPrice: 7000 },
-]
-
-// Per-unit floor prices
-export const FLOOR_UNIT_PRICES = {
-  vcpu: 400, // per vCPU
-  ram: 200,  // per GB RAM
-  storage: 8, // per GB Storage
-  network: 6000, // per unit (example)
-  // Add more as needed
 }
 
 // Helper to extract vCPU and RAM from description (e.g., '4 vCPU, 16GB RAM')
@@ -47,17 +39,6 @@ function extractStorageGB(description) {
   const match = description.match(/(\d+)\s*GB/i)
   return match ? parseInt(match[1]) : 0
 }
-
-export const VM_OS_OPTIONS = [
-  { label: 'Windows Server 2022', value: 'windows-2022', price: 800 },
-  { label: 'Ubuntu 22.04 LTS', value: 'ubuntu', price: 0 },
-  { label: 'Red Hat Enterprise Linux', value: 'rhel', price: 1200 }
-]
-export const VM_FEATURES = [
-  { label: 'Antivirus', value: 'antivirus', price: 200 },
-  { label: 'Backup', value: 'backup', price: 300 },
-  { label: 'SQL Server', value: 'sql-server', price: 8000 }
-]
 
 // Helper to generate internal code for VMs
 function getVmInternalCode(vmConfig) {
@@ -96,47 +77,118 @@ function parseVmConfigFromDescription(description) {
   }
 }
 
+// Helper to get floor price for an item
+function getFloorPrice(item) {
+  if (item.category === 'Compute' && item.vmConfig) {
+    return item.vmConfig.vcpu * FLOOR_UNIT_PRICES.vcpu +
+      item.vmConfig.ram * FLOOR_UNIT_PRICES.ram +
+      item.vmConfig.storage * FLOOR_UNIT_PRICES.storage +
+      (VM_OS_OPTIONS.find(o => o.value === item.vmConfig.os)?.price || 0) +
+      (item.vmConfig.features?.reduce((sum, f) => sum + (VM_FEATURES.find(x => x.value === f)?.price || 0), 0) || 0);
+  } else if (item.category === 'Storage' && item.storageConfig) {
+    return item.storageConfig.size * FLOOR_UNIT_PRICES.storage;
+  } else if (item.category === 'Network') {
+    return FLOOR_UNIT_PRICES.network;
+  } else if (FLOOR_UNIT_PRICES[item.sku]) {
+    return FLOOR_UNIT_PRICES[item.sku];
+  }
+  return item.unitPrice || 0;
+}
+
 const BoQGenerated = () => {
   const location = useLocation()
-  let projectData = null
-  let projectId = null
-  if (location.state && location.state.projectId) {
-    projectId = location.state.projectId
-    projectData = getProject(projectId)
-  }
-  // Fallback mock for demo
-  if (!projectData) {
-    projectData = {
-      customerName: 'Edgecut Technologies Ltd',
-      projectName: 'Web Application Infrastructure',
-      contractTerm: 'ANNUAL',
-      dealId: 'PROJ-1750049645141'
+  const navigate = useNavigate()
+  
+  const [projectData, setProjectData] = useState(null)
+  const [currentPersona, setCurrentPersona] = useState(() => {
+    // Get persona from location state or localStorage, and map to short form
+    const persona = location.state?.currentPersona || getCurrentPersona()
+    switch(persona) {
+      case PERSONAS.ACCOUNT_MANAGER:
+        return 'AM'
+      case PERSONAS.SOLUTION_ARCHITECT:
+        return 'SA'
+      case PERSONAS.PRODUCT_MANAGER:
+        return 'PM'
+      default:
+        return 'AM'
     }
-  }
-  const [boqItems, setBoqItems] = React.useState([
-    { description: 'Virtual Machine - Standard (4 vCPU, 16GB RAM)', sku: 'CI-COMPUTE', internalCode: 'CI-1VCPU-1GB+AddOn', category: 'Compute', quantity: 3, unitPrice: 15000, totalPrice: 45000, type: 'standard' },
-    { description: 'Load Balancer - Application Layer', sku: 'CI-NETWORK', internalCode: 'CI-LB+AddOn', category: 'Network', quantity: 1, unitPrice: 8000, totalPrice: 8000, type: 'standard' },
-    { description: 'Storage - SSD Premium', sku: 'CI-STORAGE', internalCode: 'CI-STORAGE-1GB+AddOn', category: 'Storage', quantity: 500, unitPrice: 50, totalPrice: 25000, type: 'standard' },
-    { description: 'Firewall Service - Enterprise', sku: 'CI-SECURITY', internalCode: 'CI-FW+AddOn', category: 'Security', quantity: 1, unitPrice: 12000, totalPrice: 12000, type: 'standard' },
-    { description: 'Backup Service - Daily', sku: 'CI-BACKUP', internalCode: 'CI-BKP+AddOn', category: 'Backup', quantity: 1, unitPrice: 5000, totalPrice: 5000, type: 'standard', essential: true, autoAdded: true },
-    { description: 'VPN Access - Site-to-Site', sku: 'CI-VPN', internalCode: 'CI-VPN+AddOn', category: 'VPN', quantity: 1, unitPrice: 3000, totalPrice: 3000, type: 'standard', essential: true, autoAdded: true },
-    { description: 'Internet Connectivity - Dedicated', sku: 'CI-INTERNET', internalCode: 'CI-INET+AddOn', category: 'Internet', quantity: 1, unitPrice: 7000, totalPrice: 7000, type: 'standard', essential: true, autoAdded: true }
-  ])
-  const [editingIndex, setEditingIndex] = React.useState(null)
-  const [editValues, setEditValues] = React.useState({})
-  const [showAdd, setShowAdd] = React.useState(false)
-  const [addValues, setAddValues] = React.useState({ sku: '', quantity: 1, unitPrice: '', description: '' })
-  const [approvalRequired, setApprovalRequired] = React.useState(false)
-  const [isFinanceAdmin, setIsFinanceAdmin] = React.useState(false)
-  const [editedRows, setEditedRows] = React.useState([])
-  const [vmConfig, setVmConfig] = React.useState({ vcpu: 2, ram: 4, storage: 50, os: 'windows-2022', features: [] })
-  const [storageConfig, setStorageConfig] = React.useState({ size: 100, iops: 3000, type: 'ssd', encrypted: false })
-  const [networkConfig, setNetworkConfig] = React.useState({ bandwidth: 100, staticIp: false, firewall: false })
-  const [expandedRows, setExpandedRows] = React.useState([])
-  const [newlyAddedIndex, setNewlyAddedIndex] = React.useState(null)
+  })
+  const [error, setError] = useState(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  // Initialize boqItems from the passed data or use defaults
+  const [boqItems, setBoqItems] = useState([])
+
+  useEffect(() => {
+    // Robust project loading: always prefer main projects list
+    let projectId = location.state?.projectId;
+    if (!projectId) {
+      // Try URL params
+      const params = new URLSearchParams(window.location.search);
+      projectId = params.get('projectId');
+    }
+    if (!projectId) {
+      // Try localStorage currentProject
+      const currentProject = localStorage.getItem('currentProject');
+      if (currentProject) {
+        try {
+          const parsed = JSON.parse(currentProject);
+          projectId = parsed.id;
+        } catch (e) { /* ignore */ }
+      }
+    }
+    let loadedProject = null;
+    if (projectId) {
+      loadedProject = getProject(projectId);
+      if (loadedProject) {
+        setProjectData(loadedProject);
+        if (loadedProject.boqItems) {
+          const newItems = loadedProject.boqItems.map(item => {
+            const category = (item.category || 'COMPUTE').toUpperCase();
+            return {
+              ...normalizeBoqItem(item),
+              category,
+              sku: item.sku || DEFAULT_SKU[category] || DEFAULT_SKU['COMPUTE']
+            };
+          });
+          setBoqItems(newItems);
+          console.log('BoQGenerated: loaded project from main list', loadedProject);
+          console.log('BoQGenerated: loaded boqItems', newItems);
+          return;
+        }
+      }
+    }
+    // Fallback to location.state
+    if (location.state) {
+      setProjectData(location.state);
+      if (location.state.boqItems) {
+        const newItems = location.state.boqItems.map(item => {
+          const category = (item.category || 'COMPUTE').toUpperCase();
+          return {
+            ...normalizeBoqItem(item),
+            category,
+            sku: item.sku || DEFAULT_SKU[category] || DEFAULT_SKU['COMPUTE']
+          };
+        });
+        setBoqItems(newItems);
+        console.log('BoQGenerated: initialized boqItems from location.state', newItems);
+      }
+    }
+  }, [location.state]);
+
+  const [editingIndex, setEditingIndex] = useState(null)
+  const [editValues, setEditValues] = useState({})
+  const [showAdd, setShowAdd] = useState(false)
+  const [addValues, setAddValues] = useState({ sku: '', quantity: 1, unitPrice: '', description: '' })
+  const [approvalRequired, setApprovalRequired] = useState(false)
+  const [isFinanceAdmin, setIsFinanceAdmin] = useState(false)
+  const [editedRows, setEditedRows] = useState([])
+  const [expandedRows, setExpandedRows] = useState([])
+  const [newlyAddedIndex, setNewlyAddedIndex] = useState(null)
 
   // Calculate totals
-  const subtotal = boqItems.reduce((sum, item) => sum + item.totalPrice, 0)
+  const subtotal = boqItems.reduce((sum, item) => sum + (item.totalPrice || 0), 0)
   const contractDiscount = 15
   const discountAmount = subtotal * (contractDiscount / 100)
   const afterDiscount = subtotal - discountAmount
@@ -154,439 +206,227 @@ const BoQGenerated = () => {
   }
 
   const resources = {
-    totalVMs: boqItems.filter(i => i.category === 'Compute').reduce((a, b) => a + b.quantity, 0),
-    totalCPU: boqItems.filter(i => i.category === 'Compute').reduce((a, b) => a + (b.quantity * 4), 0),
-    totalRAM: boqItems.filter(i => i.category === 'Compute').reduce((a, b) => a + (b.quantity * 16), 0),
-    totalStorage: boqItems.filter(i => i.category === 'Storage').reduce((a, b) => a + b.quantity, 0)
+    totalVMs: boqItems.filter(i => i.category === 'COMPUTE').reduce((a, b) => a + (b.quantity || 0), 0),
+    totalCPU: boqItems.filter(i => i.category === 'COMPUTE' && i.vmConfig).reduce((a, b) => a + ((b.quantity || 0) * (b.vmConfig.vcpu || 0)), 0),
+    totalRAM: boqItems.filter(i => i.category === 'COMPUTE' && i.vmConfig).reduce((a, b) => a + ((b.quantity || 0) * (b.vmConfig.ram || 0)), 0),
+    totalStorage: boqItems.filter(i => i.category === 'STORAGE').reduce((a, b) => a + (b.quantity || 0), 0)
   }
 
-  // Edit handlers
-  const handleEdit = (idx) => {
-    setEditingIndex(idx)
-    setEditValues({
-      quantity: boqItems[idx].quantity,
-      unitPrice: boqItems[idx].unitPrice
-    })
-  }
-  const handleEditChange = (field, value) => {
-    setEditValues(prev => ({ ...prev, [field]: value }))
-  }
-  const handleEditSave = (idx) => {
-    const updated = [...boqItems]
-    const newQty = parseInt(editValues.quantity)
-    const newPrice = parseInt(editValues.unitPrice)
-    updated[idx].quantity = newQty
-    updated[idx].unitPrice = newPrice
-    updated[idx].totalPrice = newQty * newPrice
-    // If VM config exists, update internal code
-    if (updated[idx].category === 'Compute' && updated[idx].vmConfig) {
-      updated[idx].internalCode = getInternalCode(updated[idx])
-    }
-    setBoqItems(updated)
-    setEditingIndex(null)
-    setEditedRows(prev => prev.includes(idx) ? prev : [...prev, idx])
-    // Dynamic floor price check
-    let floor = 0
-    const item = updated[idx]
-    if (item.category === 'Compute' && item.vmConfig) {
-      floor = getVmUnitPrice() * newQty
-    } else if (item.category === 'Compute') {
-      const { vcpu, ram } = extractVMConfig(item.description)
-      floor = (vcpu * FLOOR_UNIT_PRICES.vcpu + ram * FLOOR_UNIT_PRICES.ram) * newQty
-    } else if (item.category === 'Storage') {
-      const gb = extractStorageGB(item.description)
-      floor = gb * FLOOR_UNIT_PRICES.storage * newQty
-    } else if (item.category === 'Network') {
-      floor = FLOOR_UNIT_PRICES.network * newQty
-    } else {
-      floor = 0 // fallback for other categories
-    }
-    if (floor > 0 && (newPrice * newQty) < floor) {
-      setApprovalRequired(true)
-    } else {
-      setApprovalRequired(false)
-    }
-  }
-  const handleEditCancel = () => {
-    setEditingIndex(null)
-    setEditValues({})
-  }
-
-  // Add resource handlers
-  const handleAddResource = () => {
-    setShowAdd(true)
-    setAddValues({ sku: '', quantity: 1, unitPrice: '', description: '' })
-  }
-  const handleAddChange = (field, value) => {
-    setAddValues(prev => ({ ...prev, [field]: value }))
-    if (field === 'sku') {
-      const cat = CATALOG.find(c => c.sku === value)
-      if (cat) {
-        setAddValues(prev => ({ ...prev, unitPrice: cat.unitPrice, description: cat.label }))
-      }
-      if (value === 'CI-COMPUTE') {
-        setVmConfig({ vcpu: 2, ram: 4, storage: 50, os: 'windows-2022', features: [] })
-      }
-    }
-  }
-  const handleVmConfigChange = (field, value) => {
-    setVmConfig(prev => ({ ...prev, [field]: value }))
-  }
-  const handleVmFeatureToggle = (feature) => {
-    setVmConfig(prev => ({ ...prev, features: prev.features.includes(feature) ? prev.features.filter(f => f !== feature) : [...prev.features, feature] }))
-  }
-  const getVmDescription = () => {
-    const osLabel = VM_OS_OPTIONS.find(o => o.value === vmConfig.os)?.label || ''
-    const featuresLabel = vmConfig.features.map(f => VM_FEATURES.find(x => x.value === f)?.label).filter(Boolean).join(', ')
-    return `VM - ${vmConfig.vcpu} vCPU, ${vmConfig.ram}GB RAM, ${vmConfig.storage}GB SSD, ${osLabel}${featuresLabel ? ', ' + featuresLabel : ''}`
-  }
-  const getVmUnitPrice = () => {
-    let price = vmConfig.vcpu * FLOOR_UNIT_PRICES.vcpu + vmConfig.ram * FLOOR_UNIT_PRICES.ram + vmConfig.storage * FLOOR_UNIT_PRICES.storage
-    price += VM_OS_OPTIONS.find(o => o.value === vmConfig.os)?.price || 0
-    price += vmConfig.features.reduce((sum, f) => sum + (VM_FEATURES.find(x => x.value === f)?.price || 0), 0)
-    return price
-  }
-  const handleAddSave = () => {
-    if (!addValues.sku || !addValues.quantity || !addValues.unitPrice) return
-    let newItem
-    if (addValues.sku === 'CI-COMPUTE') {
-      newItem = {
-        description: getVmDescription(),
-        sku: addValues.sku,
-        internalCode: getInternalCode({ category: 'Compute', vmConfig }),
-        category: 'Compute',
-        quantity: parseInt(addValues.quantity),
-        unitPrice: parseInt(addValues.unitPrice),
-        totalPrice: parseInt(addValues.quantity) * parseInt(addValues.unitPrice),
-        type: 'standard',
-        vmConfig: { ...vmConfig }
-      }
-    } else if (addValues.sku === 'CI-STORAGE') {
-      newItem = {
-        description: `Storage - ${storageConfig.size}GB ${storageConfig.type.toUpperCase()}${storageConfig.encrypted ? ' (Encrypted)' : ''}, ${storageConfig.iops} IOPS`,
-        sku: addValues.sku,
-        internalCode: getInternalCode({ category: 'Storage', storageConfig }),
-        category: 'Storage',
-        quantity: parseInt(addValues.quantity),
-        unitPrice: parseInt(addValues.unitPrice),
-        totalPrice: parseInt(addValues.quantity) * parseInt(addValues.unitPrice),
-        type: 'standard',
-        storageConfig: { ...storageConfig }
-      }
-    } else if (addValues.sku === 'CI-NETWORK') {
-      newItem = {
-        description: `Network - ${networkConfig.bandwidth}Mbps${networkConfig.staticIp ? ', Static IP' : ''}${networkConfig.firewall ? ', Firewall' : ''}`,
-        sku: addValues.sku,
-        internalCode: getInternalCode({ category: 'Network', networkConfig }),
-        category: 'Network',
-        quantity: parseInt(addValues.quantity),
-        unitPrice: parseInt(addValues.unitPrice),
-        totalPrice: parseInt(addValues.quantity) * parseInt(addValues.unitPrice),
-        type: 'standard',
-        networkConfig: { ...networkConfig }
-      }
-    } else {
-      const cat = CATALOG.find(c => c.sku === addValues.sku)
-      newItem = {
-        description: addValues.description,
-        sku: addValues.sku,
-        internalCode: cat.internalCode,
-        category: cat.category,
-        quantity: parseInt(addValues.quantity),
-        unitPrice: parseInt(addValues.unitPrice),
-        totalPrice: parseInt(addValues.quantity) * parseInt(addValues.unitPrice),
-        type: 'standard'
-      }
-    }
-    setBoqItems(prev => {
-      const updated = [...prev, newItem]
-      setNewlyAddedIndex(updated.length - 1)
-      setTimeout(() => setNewlyAddedIndex(null), 2000)
-      return updated
-    })
-    setShowAdd(false)
-    // Dynamic floor price check
-    let floor = 0
-    if (newItem.category === 'Compute') {
-      floor = getVmUnitPrice() * newItem.quantity
-    } else if (newItem.category === 'Storage') {
-      const gb = extractStorageGB(newItem.description)
-      floor = gb * FLOOR_UNIT_PRICES.storage * newItem.quantity
-    } else if (newItem.category === 'Network') {
-      floor = FLOOR_UNIT_PRICES.network * newItem.quantity
-    } else {
-      floor = 0
-    }
-    if (floor > 0 && (newItem.unitPrice * newItem.quantity) < floor) {
-      setApprovalRequired(true)
-    } else {
-      setApprovalRequired(false)
-    }
-  }
-  const handleAddCancel = () => {
-    setShowAdd(false)
-    setAddValues({ sku: '', quantity: 1, unitPrice: '', description: '' })
-  }
-
-  const toggleExpand = idx => setExpandedRows(prev => prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx])
-
-  // On initial load or when BoQ items change, attach vmConfig to Compute items if missing
-  React.useEffect(() => {
-    setBoqItems(items => items.map(item => {
-      if (item.category === 'Compute' && !item.vmConfig) {
-        return { ...item, vmConfig: parseVmConfigFromDescription(item.description), internalCode: getInternalCode({ ...item, vmConfig: parseVmConfigFromDescription(item.description) }) }
-      }
-      if (item.category === 'Compute' && item.vmConfig) {
-        return { ...item, internalCode: getInternalCode(item) }
-      }
-      if (item.category === 'Storage' && item.storageConfig) {
-        return { ...item, internalCode: getInternalCode(item) }
-      }
-      if (item.category === 'Network' && item.networkConfig) {
-        return { ...item, internalCode: getInternalCode(item) }
-      }
-      return item
-    }))
-  }, [])
-
-  // Expanded row for Compute: show and allow editing of VM specs
-  const handleVmSpecEdit = (idx, field, value) => {
-    setBoqItems(items => items.map((item, i) => {
-      if (i === idx && item.category === 'Compute') {
-        const newVmConfig = { ...item.vmConfig, [field]: value }
-        // Update internal code and price
-        const newUnitPrice = newVmConfig.vcpu * FLOOR_UNIT_PRICES.vcpu + newVmConfig.ram * FLOOR_UNIT_PRICES.ram + newVmConfig.storage * FLOOR_UNIT_PRICES.storage + (VM_OS_OPTIONS.find(o => o.value === newVmConfig.os)?.price || 0) + (newVmConfig.features?.reduce((sum, f) => sum + (VM_FEATURES.find(x => x.value === f)?.price || 0), 0) || 0)
+  // Add approveAskPrice handler
+  const approveAskPrice = () => {
+    setBoqItems(prev => prev.map(item => {
+      if (item.askPrice !== undefined && item.askPrice !== item.unitPrice) {
+        const newUnitPrice = parseInt(item.askPrice) || item.unitPrice;
         return {
           ...item,
-          vmConfig: newVmConfig,
-          internalCode: getInternalCode({ ...item, vmConfig: newVmConfig }),
           unitPrice: newUnitPrice,
-          totalPrice: newUnitPrice * item.quantity
-        }
+          totalPrice: newUnitPrice * (item.quantity || 1)
+        };
       }
-      return item
-    }))
-  }
-  const handleVmFeatureToggleRow = (idx, feature) => {
-    setBoqItems(items => items.map((item, i) => {
-      if (i === idx && item.category === 'Compute') {
-        const features = item.vmConfig.features.includes(feature)
-          ? item.vmConfig.features.filter(f => f !== feature)
-          : [...item.vmConfig.features, feature]
-        const newVmConfig = { ...item.vmConfig, features }
-        const newUnitPrice = newVmConfig.vcpu * FLOOR_UNIT_PRICES.vcpu + newVmConfig.ram * FLOOR_UNIT_PRICES.ram + newVmConfig.storage * FLOOR_UNIT_PRICES.storage + (VM_OS_OPTIONS.find(o => o.value === newVmConfig.os)?.price || 0) + (features.reduce((sum, f) => sum + (VM_FEATURES.find(x => x.value === f)?.price || 0), 0) || 0)
-        return {
-          ...item,
-          vmConfig: newVmConfig,
-          internalCode: getInternalCode({ ...item, vmConfig: newVmConfig }),
-          unitPrice: newUnitPrice,
-          totalPrice: newUnitPrice * item.quantity
-        }
-      }
-      return item
-    }))
-  }
+      return item;
+    }));
+  };
 
-  const handleApprovalStatusChange = (anyRequireApproval) => {
-    setApprovalRequired(anyRequireApproval)
-  }
+  // Determine workflow
+  const workflow = (projectData?.flowType && projectData.flowType !== 'STANDARD') ? 'custom' : 'standard';
 
-  const handleApproveAll = () => {
-    setBoqItems(items => items.map(item => ({ ...item, requiresApproval: false })))
-    setApprovalRequired(false)
+  // Check if any item is below floor price
+  const hasBelowFloor = boqItems.some(item => {
+    const ask = parseInt(item.askPrice) || 0;
+    const floor = getFloorPrice(item);
+    return ask < floor;
+  });
+
+  if (!projectData) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading project data...</p>
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: '#f9fafb', fontFamily: 'system-ui, sans-serif' }}>
-      {/* Header */}
-      <div style={{ backgroundColor: 'white', borderBottom: '1px solid #e5e7eb', padding: '1rem 2rem' }}>
-        <h1 style={{ fontSize: '1.5rem', fontWeight: 'bold', margin: '0 0 0.5rem 0', color: '#111827' }}>
-          Bill of Quantities (BoQ)
-        </h1>
-        <p style={{ color: '#6b7280', margin: 0 }}>
-          Generated pricing proposal for {projectData.customerName}
-        </p>
-        <div style={{ position: 'absolute', top: '1rem', right: '2rem' }}>
-          <span style={{ 
-            backgroundColor: '#dbeafe', 
-            color: '#1e40af', 
-            padding: '0.25rem 0.75rem', 
-            borderRadius: '0.375rem',
-            fontSize: '0.875rem'
-          }}>
-            Account Manager
+    <div className="container mx-auto p-6 space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">Bill of Quantities</h1>
+          <p className="text-muted-foreground">Review and finalize your infrastructure configuration</p>
+        </div>
+        <div className="flex items-center gap-4">
+          <span style={{ fontWeight: 500, color: '#374151', background: '#f3f4f6', borderRadius: 6, padding: '0.25rem 0.75rem', fontSize: 15 }}>
+            Role: {currentPersona === 'AM' ? 'Account Manager' : currentPersona === 'SA' ? 'Solution Architect' : currentPersona === 'PM' ? 'Product Manager' : currentPersona}
           </span>
+          <Button variant="outline" onClick={() => navigate(-1)}>
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Back
+          </Button>
         </div>
       </div>
 
-      <div style={{ maxWidth: '80rem', margin: '0 auto', padding: '1.5rem' }}>
-        {/* Project Summary */}
-        <div style={{ 
-          backgroundColor: 'white', 
-          borderRadius: '0.5rem', 
-          border: '1px solid #e5e7eb',
-          marginBottom: '1.5rem',
-          overflow: 'hidden'
-        }}>
-          <div style={{ padding: '1.5rem', borderBottom: '1px solid #e5e7eb' }}>
-            <h2 style={{ fontSize: '1.125rem', fontWeight: '600', margin: '0 0 0.5rem 0', color: '#111827' }}>
-              📄 Project Summary
-            </h2>
-          </div>
-          <div style={{ padding: '1.5rem' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
-              <div>
-                <p style={{ fontSize: '0.875rem', color: '#6b7280', margin: '0 0 0.25rem 0' }}>Customer</p>
-                <p style={{ fontWeight: '500', margin: 0, color: '#111827' }}>{projectData.customerName}</p>
-              </div>
-              <div>
-                <p style={{ fontSize: '0.875rem', color: '#6b7280', margin: '0 0 0.25rem 0' }}>Project</p>
-                <p style={{ fontWeight: '500', margin: 0, color: '#111827' }}>{projectData.projectName}</p>
-              </div>
-              <div>
-                <p style={{ fontSize: '0.875rem', color: '#6b7280', margin: '0 0 0.25rem 0' }}>Contract Term</p>
-                <p style={{ fontWeight: '500', margin: 0, color: '#111827' }}>{projectData.contractTerm}</p>
-                <p style={{ fontSize: '0.75rem', color: '#059669', margin: '0.25rem 0 0 0' }}>15% discount applied</p>
-              </div>
-              <div>
-                <p style={{ fontSize: '0.875rem', color: '#6b7280', margin: '0 0 0.25rem 0' }}>Deal ID</p>
-                <p style={{ fontWeight: '500', margin: 0, color: '#111827' }}>{projectData.dealId}</p>
-              </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Project Details</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <p className="text-sm font-medium">Customer Name</p>
+              <p className="text-muted-foreground">{projectData.customerName}</p>
+            </div>
+            <div>
+              <p className="text-sm font-medium">Project Name</p>
+              <p className="text-muted-foreground">{projectData.projectName}</p>
+            </div>
+            <div>
+              <p className="text-sm font-medium">Deal ID</p>
+              <p className="text-muted-foreground">{projectData.dealId}</p>
             </div>
           </div>
-        </div>
+        </CardContent>
+      </Card>
 
-        {/* Resource Summary (no Bulk) */}
-        <div style={{ backgroundColor: 'white', borderRadius: '0.5rem', border: '1px solid #e5e7eb', marginBottom: '1.5rem', overflow: 'hidden' }}>
-          <div style={{ padding: '1.5rem', borderBottom: '1px solid #e5e7eb' }}>
-            <h2 style={{ fontSize: '1.125rem', fontWeight: '600', margin: '0 0 0.5rem 0', color: '#111827' }}>
-              🧮 Resource Summary
-            </h2>
-            <p style={{ fontSize: '0.875rem', color: '#6b7280', margin: 0 }}>
-              Simplified CPU/RAM configuration overview
-            </p>
-          </div>
-          <div style={{ padding: '1.5rem' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
-              <div style={{ backgroundColor: '#dbeafe', padding: '1rem', borderRadius: '0.5rem' }}>
-                <p style={{ fontSize: '0.875rem', color: '#1e40af', margin: '0 0 0.5rem 0' }}>Total VMs</p>
-                <p style={{ fontSize: '2rem', fontWeight: 'bold', color: '#1e3a8a', margin: '0 0 0.25rem 0' }}>{resources.totalVMs}</p>
-                <p style={{ fontSize: '0.75rem', color: '#1e40af', margin: 0 }}>Standard instances</p>
-              </div>
-              <div style={{ backgroundColor: '#dcfce7', padding: '1rem', borderRadius: '0.5rem' }}>
-                <p style={{ fontSize: '0.875rem', color: '#166534', margin: '0 0 0.5rem 0' }}>Total vCPUs</p>
-                <p style={{ fontSize: '2rem', fontWeight: 'bold', color: '#14532d', margin: '0 0 0.25rem 0' }}>{resources.totalCPU}</p>
-                <p style={{ fontSize: '0.75rem', color: '#166534', margin: 0 }}>High performance</p>
-              </div>
-              <div style={{ backgroundColor: '#f3e8ff', padding: '1rem', borderRadius: '0.5rem' }}>
-                <p style={{ fontSize: '0.875rem', color: '#7c3aed', margin: '0 0 0.5rem 0' }}>Total RAM</p>
-                <p style={{ fontSize: '2rem', fontWeight: 'bold', color: '#6b21a8', margin: '0 0 0.25rem 0' }}>{resources.totalRAM} GB</p>
-                <p style={{ fontSize: '0.75rem', color: '#7c3aed', margin: 0 }}>DDR4 memory</p>
-              </div>
-              <div style={{ backgroundColor: '#fed7aa', padding: '1rem', borderRadius: '0.5rem' }}>
-                <p style={{ fontSize: '0.875rem', color: '#ea580c', margin: '0 0 0.5rem 0' }}>Total Storage</p>
-                <p style={{ fontSize: '2rem', fontWeight: 'bold', color: '#c2410c', margin: '0 0 0.25rem 0' }}>{resources.totalStorage} GB</p>
-                <p style={{ fontSize: '0.75rem', color: '#ea580c', margin: 0 }}>SSD premium</p>
-              </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Resource Configuration</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <BoQTable
+            items={boqItems}
+            setItems={setBoqItems}
+            editable={projectData?.flowType === 'custom'
+              ? (currentPersona === 'AM' && (projectData?.status === 'Draft' || projectData?.status === 'Pending Solution Architect Review'))
+                || (currentPersona === 'PM' && projectData?.status === 'Pending Product Manager Review')
+              : true}
+            allowCustomSKU={projectData?.flowType !== 'custom'}
+            restrictEditToStandardSkus={projectData?.flowType === 'custom' && currentPersona === 'AM'}
+            restrictEditToCustomSkus={projectData?.flowType === 'custom' && currentPersona === 'PM'}
+            highlightNew={newlyAddedIndex}
+            onAddResource={(item) => {
+              setBoqItems(prev => [...prev, item]);
+              setNewlyAddedIndex(boqItems.length);
+              setTimeout(() => setNewlyAddedIndex(null), 2000);
+            }}
+            onEditResource={(idx, item) => {
+              const updated = [...boqItems];
+              updated[idx] = item;
+              setBoqItems(updated);
+            }}
+            onApprovalStatusChange={setApprovalRequired}
+            persona={currentPersona}
+            workflow={workflow}
+          />
+        </CardContent>
+      </Card>
+
+      <Card style={{ boxShadow: '0 2px 16px rgba(0,0,0,0.07)', borderRadius: 16, marginBottom: 32 }}>
+        <CardHeader>
+          <CardTitle>Summary</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+            <div className="space-y-1">
+              <p className="text-sm font-medium">Total VMs</p>
+              <p className="text-2xl font-bold">{resources.totalVMs}</p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-sm font-medium">Total vCPUs</p>
+              <p className="text-2xl font-bold">{resources.totalCPU}</p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-sm font-medium">Total RAM (GB)</p>
+              <p className="text-2xl font-bold">{resources.totalRAM}</p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-sm font-medium">Total Storage (GB)</p>
+              <p className="text-2xl font-bold">{resources.totalStorage}</p>
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card style={{ boxShadow: '0 2px 16px rgba(0,0,0,0.07)', borderRadius: 16, marginBottom: 120 }}>
+        <CardHeader>
+          <CardTitle>Pricing Summary</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableBody>
+              <TableRow>
+                <TableCell>Subtotal</TableCell>
+                <TableCell className="text-right">₹{totals.subtotal.toLocaleString()}</TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell>Contract Discount ({totals.contractDiscount}%)</TableCell>
+                <TableCell className="text-right">-₹{totals.discountAmount.toLocaleString()}</TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell>Tax (18%)</TableCell>
+                <TableCell className="text-right">₹{totals.tax.toLocaleString()}</TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell className="font-bold">Total (Monthly)</TableCell>
+                <TableCell className="text-right font-bold">₹{totals.monthlyTotal.toLocaleString()}</TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell className="font-bold">Total (Annual)</TableCell>
+                <TableCell className="text-right font-bold">₹{totals.annualTotal.toLocaleString()}</TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      {projectData?.flowType === 'custom' && currentPersona === 'AM' && (projectData?.status === 'Draft' || projectData?.status === 'Pending Solution Architect Review') && (
+        <div className="flex justify-end mt-8 mb-4">
+          <Button
+            onClick={() => {
+              // Update project status and navigate
+              const updatedProject = { ...projectData, status: 'Pending Solution Architect Review', boqItems };
+              localStorage.setItem('currentProject', JSON.stringify(updatedProject));
+              navigate('/solution-architect-vetting', { state: { projectId: updatedProject.id, currentPersona: 'SA' } });
+            }}
+            style={{ background: '#2563eb', color: 'white', fontWeight: 800, fontSize: 20, borderRadius: 10, padding: '1.25rem 3rem', boxShadow: '0 4px 16px rgba(37,99,235,0.15)', letterSpacing: 0.5, display: 'flex', alignItems: 'center', gap: 12 }}
+          >
+            <ArrowRight className="w-6 h-6 mr-2" />
+            Send to Solution Architect for Review
+          </Button>
         </div>
+      )}
 
-        {/* BoQ Items Table */}
-        <BoQTable
-          items={boqItems}
-          setItems={setBoqItems}
-          editable={true}
-          highlightNew={newlyAddedIndex}
-          onAddResource={handleAddResource}
-          onEditResource={(idx, updatedItem) => {
-            // Optionally handle side effects here
-          }}
-          onApprovalStatusChange={handleApprovalStatusChange}
-        />
-
-        {/* Pricing Summary */}
-        <div style={{ 
-          backgroundColor: 'white', 
-          borderRadius: '0.5rem', 
-          border: '1px solid #e5e7eb',
-          marginBottom: '1.5rem',
-          overflow: 'hidden'
-        }}>
-          <div style={{ padding: '1.5rem', borderBottom: '1px solid #e5e7eb' }}>
-            <h2 style={{ fontSize: '1.125rem', fontWeight: '600', margin: '0 0 0.5rem 0', color: '#111827' }}>
-              📈 Pricing Summary
-            </h2>
-            <p style={{ fontSize: '0.875rem', color: '#6b7280', margin: 0 }}>
-              Contract terms and pricing breakdown with GST
-            </p>
-          </div>
-          <div style={{ padding: '1.5rem' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>Subtotal</span>
-                <span>₹{totals.subtotal?.toLocaleString()}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', color: '#059669' }}>
-                <span>Annual Contract Discount ({totals.contractDiscount}%)</span>
-                <span>-₹{totals.discountAmount?.toLocaleString()}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>GST (18%)</span>
-                <span>₹{totals.tax?.toLocaleString()}</span>
-              </div>
-              <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: '0.75rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '1.125rem' }}>
-                  <span>Monthly Total</span>
-                  <span>₹{totals.monthlyTotal?.toLocaleString()}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#6b7280' }}>
-                  <span>Annual Total (12 months)</span>
-                  <span>₹{totals.annualTotal?.toLocaleString()}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Approval Required Banner */}
-        {approvalRequired && (
-          <div style={{ background: '#fef3c7', color: '#92400e', padding: 16, borderRadius: 8, marginBottom: 24, border: '1px solid #fde68a', fontWeight: 500, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span>⚠️ One or more items are priced below floor. Finance Admin approval required before proposal can be sent.</span>
-            {isFinanceAdmin && (
-              <button onClick={handleApproveAll} style={{ background: '#2563eb', color: 'white', border: 'none', borderRadius: 4, padding: '0.5rem 1.25rem', marginLeft: 16 }}>Approve All</button>
-            )}
-          </div>
+      {/* Sticky bottom bar for actions */}
+      <div style={{
+        position: 'fixed',
+        left: 0,
+        bottom: 0,
+        width: '100%',
+        background: 'rgba(255,255,255,0.98)',
+        boxShadow: '0 -2px 16px rgba(0,0,0,0.07)',
+        padding: '1rem 0',
+        zIndex: 100,
+        display: 'flex',
+        justifyContent: 'center',
+        gap: 16,
+      }}>
+        <Button variant="outline" style={{ minWidth: 120, fontWeight: 500, fontSize: 16 }}>
+          <Download className="w-4 h-4 mr-2" />
+          Export
+        </Button>
+        {boqItems.some(item => item.askPrice !== undefined && item.askPrice !== item.unitPrice) && (
+          <Button variant="secondary" onClick={approveAskPrice} style={{ minWidth: 180, fontWeight: 500, fontSize: 16 }}>
+            Approve Ask Price
+          </Button>
         )}
-
-        {/* Actions */}
-        <div style={{ display: 'flex', gap: '1rem' }}>
-          <button style={{ 
-            backgroundColor: 'white',
-            border: '1px solid #d1d5db',
-            padding: '0.75rem 1.5rem', 
-            borderRadius: '0.375rem',
-            fontSize: '0.875rem',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem'
-          }}>
-            ← Back to Dashboard
-          </button>
-          <button style={{ 
-            backgroundColor: approvalRequired ? '#d1d5db' : '#2563eb',
-            color: approvalRequired ? '#6b7280' : 'white',
-            border: 'none',
-            padding: '0.75rem 1.5rem', 
-            borderRadius: '0.375rem',
-            fontSize: '0.875rem',
-            cursor: approvalRequired ? 'not-allowed' : 'pointer',
-            flex: 1
-          }} disabled={approvalRequired}>
-            Submit for Approval
-          </button>
-        </div>
+        <Button
+          onClick={() => navigate('/proposal-generated', { state: { ...projectData, boqItems, totals, projectId: projectData.id } })}
+          disabled={projectData?.flowType === 'custom' && projectData?.status !== 'Approved' && projectData?.status !== 'Pending Finance Approval'}
+          style={{ minWidth: 240, fontWeight: 700, fontSize: 18, background: '#2563eb', color: 'white', borderRadius: 8, boxShadow: '0 2px 8px rgba(37,99,235,0.08)', opacity: (projectData?.flowType === 'custom' && projectData?.status !== 'Approved' && projectData?.status !== 'Pending Finance Approval') ? 0.6 : 1, cursor: (projectData?.flowType === 'custom' && projectData?.status !== 'Approved' && projectData?.status !== 'Pending Finance Approval') ? 'not-allowed' : 'pointer' }}
+          title={projectData?.flowType === 'custom' && projectData?.status !== 'Approved' && projectData?.status !== 'Pending Finance Approval' ? 'Complete the workflow and get all approvals before generating the proposal.' : ''}
+        >
+          Generate Proposal
+        </Button>
       </div>
     </div>
   )

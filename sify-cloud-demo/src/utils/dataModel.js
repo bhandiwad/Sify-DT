@@ -30,42 +30,42 @@ export const CONTRACT_TERMS = {
 // Enhanced price-book with internal SKU codes
 export const PRICE_BOOK_SKUS = [
   // Compute
-  { sku: 'SIFY-VM-WIN-2C4G', internalCode: 'VM001', name: 'Windows VM 2vCPU 4GB', category: 'Compute', basePrice: 2400, unit: 'per month' },
-  { sku: 'SIFY-VM-WIN-4C8G', internalCode: 'VM002', name: 'Windows VM 4vCPU 8GB', category: 'Compute', basePrice: 4800, unit: 'per month' },
-  { sku: 'SIFY-VM-WIN-8C16G', internalCode: 'VM003', name: 'Windows VM 8vCPU 16GB', category: 'Compute', basePrice: 9600, unit: 'per month' },
-  { sku: 'SIFY-VM-LIN-2C4G', internalCode: 'VM004', name: 'Linux VM 2vCPU 4GB', category: 'Compute', basePrice: 2000, unit: 'per month' },
-  { sku: 'SIFY-VM-LIN-4C8G', internalCode: 'VM005', name: 'Linux VM 4vCPU 8GB', category: 'Compute', basePrice: 4000, unit: 'per month' },
-  { sku: 'SIFY-VM-LIN-8C16G', internalCode: 'VM006', name: 'Linux VM 8vCPU 16GB', category: 'Compute', basePrice: 8000, unit: 'per month' },
+  { sku: 'CI-2C4R50S-WINDOWS', internalCode: 'VM001', name: 'Windows VM 2vCPU 4GB', category: 'Compute', basePrice: 2400, unit: 'per month' },
+  { sku: 'CI-4C8R50S-WINDOWS', internalCode: 'VM002', name: 'Windows VM 4vCPU 8GB', category: 'Compute', basePrice: 4800, unit: 'per month' },
+  { sku: 'CI-8C16R50S-WINDOWS', internalCode: 'VM003', name: 'Windows VM 8vCPU 16GB', category: 'Compute', basePrice: 9600, unit: 'per month' },
+  { sku: 'CI-2C4R50S-LINUX', internalCode: 'VM004', name: 'Linux VM 2vCPU 4GB', category: 'Compute', basePrice: 2000, unit: 'per month' },
+  { sku: 'CI-4C8R50S-LINUX', internalCode: 'VM005', name: 'Linux VM 4vCPU 8GB', category: 'Compute', basePrice: 4000, unit: 'per month' },
+  { sku: 'CI-8C16R50S-LINUX', internalCode: 'VM006', name: 'Linux VM 8vCPU 16GB', category: 'Compute', basePrice: 8000, unit: 'per month' },
   
   // Storage
-  { sku: 'SIFY-STOR-SSD-100G', internalCode: 'ST001', name: 'SSD Storage 100GB', category: 'Storage', basePrice: 800, unit: 'per month' },
-  { sku: 'SIFY-STOR-SSD-500G', internalCode: 'ST002', name: 'SSD Storage 500GB', category: 'Storage', basePrice: 3500, unit: 'per month' },
-  { sku: 'SIFY-STOR-HDD-1TB', internalCode: 'ST003', name: 'HDD Storage 1TB', category: 'Storage', basePrice: 2000, unit: 'per month' },
+  { sku: 'CI-ST-100G-SSD', internalCode: 'ST001', name: 'SSD Storage 100GB', category: 'Storage', basePrice: 800, unit: 'per month' },
+  { sku: 'CI-ST-500G-SSD', internalCode: 'ST002', name: 'SSD Storage 500GB', category: 'Storage', basePrice: 3500, unit: 'per month' },
+  { sku: 'CI-ST-1000G-HDD', internalCode: 'ST003', name: 'HDD Storage 1TB', category: 'Storage', basePrice: 2000, unit: 'per month' },
   
   // Network
-  { sku: 'SIFY-LB-STD', internalCode: 'NW001', name: 'Standard Load Balancer', category: 'Network', basePrice: 2000, unit: 'per month' },
-  { sku: 'SIFY-LB-ADV', internalCode: 'NW002', name: 'Advanced Load Balancer', category: 'Network', basePrice: 4000, unit: 'per month' },
-  { sku: 'SIFY-VPN-SITE', internalCode: 'NW003', name: 'Site-to-Site VPN', category: 'Network', basePrice: 1500, unit: 'per month' },
-  { sku: 'SIFY-INET-100M', internalCode: 'NW004', name: 'Internet 100Mbps', category: 'Network', basePrice: 5000, unit: 'per month' },
-  { sku: 'SIFY-INET-1G', internalCode: 'NW005', name: 'Internet 1Gbps', category: 'Network', basePrice: 15000, unit: 'per month' },
+  { sku: 'CI-NW-STD', internalCode: 'NW001', name: 'Standard Load Balancer', category: 'Network', basePrice: 2000, unit: 'per month' },
+  { sku: 'CI-NW-ADV', internalCode: 'NW002', name: 'Advanced Load Balancer', category: 'Network', basePrice: 4000, unit: 'per month' },
+  { sku: 'CI-VPN-S2S', internalCode: 'NW003', name: 'Site-to-Site VPN', category: 'Network', basePrice: 1500, unit: 'per month' },
+  { sku: 'CI-INET-100M', internalCode: 'NW004', name: 'Internet 100Mbps', category: 'Network', basePrice: 5000, unit: 'per month' },
+  { sku: 'CI-INET-1G', internalCode: 'NW005', name: 'Internet 1Gbps', category: 'Network', basePrice: 15000, unit: 'per month' },
   
   // Security
-  { sku: 'SIFY-FW-STD', internalCode: 'SEC001', name: 'Standard Firewall', category: 'Security', basePrice: 2500, unit: 'per month' },
-  { sku: 'SIFY-FW-ENT', internalCode: 'SEC002', name: 'Enterprise Firewall', category: 'Security', basePrice: 5000, unit: 'per month' },
-  { sku: 'SIFY-AV-STD', internalCode: 'SEC003', name: 'Standard Antivirus', category: 'Security', basePrice: 300, unit: 'per instance' },
-  { sku: 'SIFY-AV-ENT', internalCode: 'SEC004', name: 'Enterprise Antivirus', category: 'Security', basePrice: 500, unit: 'per instance' },
+  { sku: 'CI-SEC-FW-STD', internalCode: 'SEC001', name: 'Standard Firewall', category: 'Security', basePrice: 2500, unit: 'per month' },
+  { sku: 'CI-SEC-FW-ENT', internalCode: 'SEC002', name: 'Enterprise Firewall', category: 'Security', basePrice: 5000, unit: 'per month' },
+  { sku: 'CI-SEC-AV-STD', internalCode: 'SEC003', name: 'Standard Antivirus', category: 'Security', basePrice: 300, unit: 'per instance' },
+  { sku: 'CI-SEC-AV-ENT', internalCode: 'SEC004', name: 'Enterprise Antivirus', category: 'Security', basePrice: 500, unit: 'per instance' },
   
   // Backup & DR
-  { sku: 'SIFY-BKP-STD', internalCode: 'BKP001', name: 'Standard Backup', category: 'Backup', basePrice: 1000, unit: 'per 100GB' },
-  { sku: 'SIFY-BKP-ENT', internalCode: 'BKP002', name: 'Enterprise Backup', category: 'Backup', basePrice: 2000, unit: 'per 100GB' },
-  { sku: 'SIFY-DR-BASIC', internalCode: 'DR001', name: 'Basic Disaster Recovery', category: 'DR', basePrice: 5000, unit: 'per month' }
+  { sku: 'CI-BKP-STD', internalCode: 'BKP001', name: 'Standard Backup', category: 'Backup', basePrice: 1000, unit: 'per 100GB' },
+  { sku: 'CI-BKP-ENT', internalCode: 'BKP002', name: 'Enterprise Backup', category: 'Backup', basePrice: 2000, unit: 'per 100GB' },
+  { sku: 'CI-DR-BASIC', internalCode: 'DR001', name: 'Basic Disaster Recovery', category: 'DR', basePrice: 5000, unit: 'per month' }
 ]
 
 // Auto-add essential services
 export const ESSENTIAL_SERVICES = [
-  { sku: 'SIFY-BKP-STD', quantity: 1, autoAdded: true, reason: 'Data protection compliance' },
-  { sku: 'SIFY-VPN-SITE', quantity: 1, autoAdded: true, reason: 'Secure connectivity' },
-  { sku: 'SIFY-INET-100M', quantity: 1, autoAdded: true, reason: 'Internet connectivity' }
+  { sku: 'CI-BKP-STD', quantity: 1, autoAdded: true, reason: 'Data protection compliance' },
+  { sku: 'CI-VPN-S2S', quantity: 1, autoAdded: true, reason: 'Secure connectivity' },
+  { sku: 'CI-INET-100M', quantity: 1, autoAdded: true, reason: 'Internet connectivity' }
 ]
 
 // Project data model with contract terms
@@ -110,6 +110,11 @@ export const canUserActOnProject = (persona, projectStatus) => {
     [PERSONAS.SOLUTION_ARCHITECT]: [PROJECT_STATUS.PENDING_SA_REVIEW, PROJECT_STATUS.PENDING_SA_FINAL],
     [PERSONAS.PRODUCT_MANAGER]: [PROJECT_STATUS.PENDING_PM_REVIEW],
     [PERSONAS.FINANCE_ADMIN]: [PROJECT_STATUS.PENDING_FINANCE_APPROVAL]
+  }
+  
+  // Allow AM to act in Solution Architect Review status
+  if (persona === PERSONAS.ACCOUNT_MANAGER && projectStatus === PROJECT_STATUS.PENDING_SA_REVIEW) {
+    return true;
   }
   
   return permissions[persona]?.includes(projectStatus) || false
@@ -239,12 +244,25 @@ export const updateProject = (projectId, updates) => {
     if (projectIndex === -1) {
       throw new Error('Project not found')
     }
-    
-    projects[projectIndex] = {
+    // Debug logs
+    console.log('[updateProject] updates:', updates)
+    // Patch: Only overwrite boqItems if updates.boqItems is a non-empty array
+    let mergedProject = {
       ...projects[projectIndex],
       ...updates,
       lastModified: new Date().toISOString()
     }
+    if (Array.isArray(updates.boqItems) && updates.boqItems.length > 0) {
+      mergedProject.boqItems = updates.boqItems
+    } else if (updates.boqItems !== undefined) {
+      // If explicitly set to empty, keep as is (for deletions)
+      mergedProject.boqItems = updates.boqItems
+    } else {
+      // Otherwise, retain existing
+      mergedProject.boqItems = projects[projectIndex].boqItems
+    }
+    console.log('[updateProject] mergedProject:', mergedProject)
+    projects[projectIndex] = mergedProject
     
     localStorage.setItem('sify_demo_data', JSON.stringify({
       projects,
@@ -274,8 +292,30 @@ export const clearDemoData = () => {
   }
 }
 
+// Map full persona names to short forms
+const PERSONA_SHORT_FORMS = {
+  [PERSONAS.ACCOUNT_MANAGER]: 'AM',
+  [PERSONAS.PRODUCT_MANAGER]: 'PM',
+  [PERSONAS.SOLUTION_ARCHITECT]: 'SA',
+  [PERSONAS.FINANCE_ADMIN]: 'FA'
+}
+
+// Map short forms back to full names
+const PERSONA_FULL_NAMES = {
+  'AM': PERSONAS.ACCOUNT_MANAGER,
+  'PM': PERSONAS.PRODUCT_MANAGER,
+  'SA': PERSONAS.SOLUTION_ARCHITECT,
+  'FA': PERSONAS.FINANCE_ADMIN
+}
+
 export const getCurrentPersona = () => {
-  return localStorage.getItem('currentPersona') || PERSONAS.ACCOUNT_MANAGER
+  const storedPersona = localStorage.getItem('currentPersona')
+  if (!storedPersona) {
+    // Set default persona if none exists
+    localStorage.setItem('currentPersona', PERSONAS.ACCOUNT_MANAGER)
+    return PERSONAS.ACCOUNT_MANAGER
+  }
+  return storedPersona
 }
 
 export const setCurrentPersona = (persona) => {
