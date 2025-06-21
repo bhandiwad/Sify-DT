@@ -10,10 +10,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/use-toast';
+import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 
 const ServiceRequest = () => {
-  const { toast } = useToast();
+  const { toast: oldToast } = useToast();
   const [selectedCategoryKey, setSelectedCategoryKey] = useState('');
   const [selectedServiceSku, setSelectedServiceSku] = useState('');
 
@@ -67,8 +68,7 @@ const ServiceRequest = () => {
     };
 
     console.log("New Service Request Submitted:", newResourceRequest);
-    toast({
-      title: "Service Request Submitted",
+    toast.success("Service Request Submitted", {
       description: `Your request for a new ${selectedService.label} has been received and is pending approval.`,
     });
     
