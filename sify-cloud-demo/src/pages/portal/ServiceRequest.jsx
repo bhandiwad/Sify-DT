@@ -9,12 +9,10 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { useToast } from '@/components/ui/use-toast';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 
 const ServiceRequest = () => {
-  const { toast: oldToast } = useToast();
   const [selectedCategoryKey, setSelectedCategoryKey] = useState('');
   const [selectedServiceSku, setSelectedServiceSku] = useState('');
 
