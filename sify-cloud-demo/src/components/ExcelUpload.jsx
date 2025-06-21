@@ -20,13 +20,11 @@ import {
   ESSENTIAL_SERVICES
 } from '@/utils/dataModel'
 
-const ExcelUpload = ({ onBoQFinalized, onProjectCreate }) => {
+const ExcelUpload = ({ onBoQFinalized, projectDetails }) => {
   const location = useLocation()
   const navigate = useNavigate()
   
-  const [projectData, setProjectData] = useState(null)
   const [file, setFile] = useState(null)
-  const [dealId, setDealId] = useState('DEAL-2025-001')
   const [isProcessing, setIsProcessing] = useState(false)
   const [processingStep, setProcessingStep] = useState('')
   const [progress, setProgress] = useState(0)
@@ -34,54 +32,13 @@ const ExcelUpload = ({ onBoQFinalized, onProjectCreate }) => {
   const [currentPersona, setCurrentPersona] = useState(getCurrentPersona())
   const [error, setError] = useState(null)
 
-  useEffect(() => {
-    // For this demo, we'll create a dummy project on component load
-    // if one doesn't exist. In a real app, you'd navigate here *with* a project.
-    const newProject = {
-      id: `PJ-${Date.now()}`,
-      projectName: "New Project from Excel",
-      customerName: "Valued Customer",
-      status: PROJECT_STATUS.DRAFT,
-      flowType: FLOW_TYPES.STANDARD, // will be updated after processing
-    };
-    setProjectData(newProject);
-    onProjectCreate(newProject); // Set project details in App state immediately
-  }, []);
-
-  const initializeComponent = () => {
-    try {
-      // Get project data from location state or URL params
-      const projectId = location.state?.projectId || new URLSearchParams(location.search).get('projectId')
-      
-      if (projectId) {
-        const project = getProject(projectId)
-        if (project) {
-          setProjectData(project)
-          setDealId(project.id)
-        } else {
-          setError('Project not found. Please start from the dashboard.')
-          return
-        }
-      } else if (location.state?.projectData) {
-        setProjectData(location.state.projectData)
-        setDealId(location.state.projectData.id)
-      } else {
-        setError('No project data found. Please start from the dashboard.')
-        return
-      }
-    } catch (err) {
-      console.error('Error initializing component:', err)
-      setError('Failed to load project data. Please try again.')
-    }
-  }
-
   const handlePersonaChange = (persona) => {
     setCurrentPersona(persona)
   }
 
   // Enhanced scenario data based on flow type
   const getScenarioExcelData = () => {
-    if (projectData.flowType === FLOW_TYPES.STANDARD) {
+    if (projectDetails.flowType === FLOW_TYPES.STANDARD) {
       // Standard scenario - all items will match SKUs
       return [
         { description: 'Application Server Windows 4 vCPU 8GB RAM', quantity: 3, notes: 'For web application hosting' },
@@ -185,7 +142,7 @@ const ExcelUpload = ({ onBoQFinalized, onProjectCreate }) => {
   }
 
   const processFile = async () => {
-    if (!projectData) {
+    if (!projectDetails) {
       setError('No project data available. Please start from the dashboard.')
       return
     }
@@ -284,15 +241,21 @@ const ExcelUpload = ({ onBoQFinalized, onProjectCreate }) => {
     )
   }
 
-  if (!projectData) {
+  if (!projectDetails) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="flex items-center justify-center h-full">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading project data...</p>
+          <AlertCircle className="mx-auto h-12 w-12 text-red-500" />
+          <h3 className="mt-2 text-lg font-medium">No Project Selected</h3>
+          <p className="mt-1 text-sm text-gray-600">
+            Please create a project from the main dashboard before uploading an Excel file.
+          </p>
+          <Button onClick={() => navigate('/')} className="mt-4">
+            Back to Dashboard
+          </Button>
         </div>
       </div>
-    )
+    );
   }
 
   return (
@@ -328,7 +291,7 @@ const ExcelUpload = ({ onBoQFinalized, onProjectCreate }) => {
                 <Label htmlFor="customer">Customer</Label>
                 <Input 
                   id="customer" 
-                  value={projectData.customerName} 
+                  value={projectDetails.customerName} 
                   disabled 
                   className="bg-gray-50"
                 />
@@ -337,16 +300,16 @@ const ExcelUpload = ({ onBoQFinalized, onProjectCreate }) => {
                 <Label htmlFor="dealId">Deal ID *</Label>
                 <Input 
                   id="dealId" 
-                  value={dealId} 
-                  onChange={(e) => setDealId(e.target.value)}
-                  placeholder="Enter deal ID"
+                  value={projectDetails.id} 
+                  disabled 
+                  className="bg-gray-50"
                 />
               </div>
               <div>
                 <Label htmlFor="projectName">Project Name</Label>
                 <Input 
                   id="projectName" 
-                  value={projectData.projectName} 
+                  value={projectDetails.projectName} 
                   disabled 
                   className="bg-gray-50"
                 />
@@ -355,7 +318,7 @@ const ExcelUpload = ({ onBoQFinalized, onProjectCreate }) => {
                 <Label htmlFor="contractTerm">Contract Term</Label>
                 <Input 
                   id="contractTerm" 
-                  value={projectData.contractTerm?.replace('_', ' ').toUpperCase() || 'ANNUAL'} 
+                  value={projectDetails.contractTerm?.replace('_', ' ').toUpperCase() || 'ANNUAL'} 
                   disabled 
                   className="bg-gray-50"
                 />
@@ -386,10 +349,10 @@ const ExcelUpload = ({ onBoQFinalized, onProjectCreate }) => {
                   {/* Demo Info */}
                   <div className="mt-4 p-3 bg-blue-50 rounded-lg">
                     <p className="text-sm text-blue-800">
-                      <strong>Demo Mode:</strong> {projectData.flowType === FLOW_TYPES.STANDARD ? 'Standard' : 'Custom'} workflow selected
+                      <strong>Demo Mode:</strong> {projectDetails.flowType === FLOW_TYPES.STANDARD ? 'Standard' : 'Custom'} workflow selected
                     </p>
                     <p className="text-xs text-blue-600 mt-1">
-                      {projectData.flowType === FLOW_TYPES.STANDARD 
+                      {projectDetails.flowType === FLOW_TYPES.STANDARD 
                         ? 'All services will match existing SKUs for fast processing'
                         : 'Mixed services will trigger full approval workflow'
                       }

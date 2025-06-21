@@ -21,10 +21,9 @@ import ServiceConfigModal from './ServiceConfigModal';
 import { v4 as uuidv4 } from 'uuid';
 import { DEFAULT_SKU } from './BoQTable';
 
-export default function ManualEntryWorkspace({ onBoQFinalized, onProjectCreate }) {
+export default function ManualEntryWorkspace({ onBoQFinalized, projectDetails }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const projectData = location.state?.projectData || {};
   
   const [selectedEnvironments, setSelectedEnvironments] = useState([]);
   const [selectedServices, setSelectedServices] = useState({});
@@ -36,20 +35,6 @@ export default function ManualEntryWorkspace({ onBoQFinalized, onProjectCreate }
   const [environments, setEnvironments] = useState({});
   
   const [configModal, setConfigModal] = useState({ open: false, envKey: null, service: null });
-  
-  // Create a dummy project on load to ensure project details are set in App.jsx
-  useState(() => {
-    if (onProjectCreate) {
-      const newProject = {
-        id: `PJ-${Date.now()}`,
-        projectName: "New Project from Manual Entry",
-        customerName: "Valued Customer",
-        status: 'Draft',
-        flowType: 'Standard',
-      };
-      onProjectCreate(newProject);
-    }
-  }, [onProjectCreate]);
   
   const findServiceDetails = (sku) => {
     for (const category of Object.values(SERVICE_CATEGORIES)) {
@@ -276,6 +261,23 @@ export default function ManualEntryWorkspace({ onBoQFinalized, onProjectCreate }
     return services;
   }, []);
   
+  if (!projectDetails) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-center">
+          <AlertCircle className="mx-auto h-12 w-12 text-red-500" />
+          <h3 className="mt-2 text-lg font-medium">No Project Selected</h3>
+          <p className="mt-1 text-sm text-gray-600">
+            Please create a project from the main dashboard before starting an interactive session.
+          </p>
+          <Button onClick={() => navigate('/')} className="mt-4">
+            Back to Dashboard
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="container mx-auto p-6 space-y-6">
       <h1 className="text-3xl font-bold">Manual Entry Workspace</h1>

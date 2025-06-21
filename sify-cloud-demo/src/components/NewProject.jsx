@@ -18,7 +18,7 @@ import {
   getContractLabel 
 } from '@/utils/dataModel'
 
-const NewProject = () => {
+const NewProject = ({ onProjectCreate }) => {
   const [formData, setFormData] = useState({
     customerName: 'Acme Technologies',
     projectName: 'Web Application Infrastructure',
@@ -92,36 +92,19 @@ const NewProject = () => {
       return
     }
 
-    try {
-      // Create new project with current form data
-      const newProject = addProject({
-        ...formData,
-        status: PROJECT_STATUS.DRAFT
-      })
-      
-      if (formData.requirementsSource === 'Interactive Entry') {
-        navigate('/manual-entry', {
-          state: {
-            projectData: newProject,
-            projectId: newProject.id
-          }
-        })
-      } else {
-        // Navigate to Excel upload with project data
-        navigate('/excel-upload', { 
-          state: { 
-            projectData: newProject,
-            projectId: newProject.id
-          } 
-        })
-      }
-    } catch (error) {
-      console.error('Error creating project:', error)
-      setErrors({ submit: 'Failed to create project. Please try again.' })
+    // Call the handler from App.jsx to set project details
+    onProjectCreate(formData);
+
+    // Navigate to the appropriate page
+    if (formData.requirementsSource === 'Interactive Entry') {
+      navigate('/manual');
+    } else {
+      navigate('/upload');
     }
   }
 
   const handleCancel = () => {
+    // This should likely reset the state in App.jsx as well
     navigate('/dashboard')
   }
 

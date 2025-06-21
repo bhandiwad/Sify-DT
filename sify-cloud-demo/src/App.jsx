@@ -48,6 +48,11 @@ function App() {
   const [projectDetails, setProjectDetails] = useState(null);
   const [customerInventory, setCustomerInventory] = useState(null);
 
+  const handleProjectCreate = (details) => {
+    setProjectDetails(details);
+    setCurrentStep(0.5); // A temporary step to show the upload/manual pages
+  };
+
   const handleBoQFinalized = (items) => {
     setBoqItems(items);
     setCurrentStep(1); // Move to BoQ Generated view
@@ -155,13 +160,13 @@ function App() {
                 <Route path="/" element={<Navigate to="/dashboard" replace />} />
                 <Route path="/dashboard" element={<Dashboard currentPersona={currentPersona} />} />
                 <Route path="/new-project" element={<NewProject />} />
-                <Route path="/excel-upload" element={<ExcelUpload onBoQFinalized={handleBoQFinalized} onProjectCreate={setProjectDetails} />} />
+                <Route path="/excel-upload" element={<ExcelUpload onBoQFinalized={handleBoQFinalized} projectDetails={projectDetails} />} />
                 <Route path="/project-details/:projectId" element={<ProjectDetails />} />
                 <Route path="/product-manager-review" element={<ProductManagerReview />} />
                 <Route path="/solution-architect-vetting" element={<SolutionArchitectVetting />} />
                 <Route path="/boq-generated" element={<BoQGenerated />} />
                 <Route path="/proposal-generated" element={<ProposalGenerated />} />
-                <Route path="/manual-entry" element={<ManualEntryWorkspace onBoQFinalized={handleBoQFinalized} onProjectCreate={setProjectDetails} />} />
+                <Route path="/manual-entry" element={<ManualEntryWorkspace onBoQFinalized={handleBoQFinalized} projectDetails={projectDetails} />} />
                 <Route path="/deployment" element={<DeploymentFlow />} />
                 <Route path="/portal" element={<PortalLayout inventory={customerInventory} />}>
                   <Route index element={<InventoryDashboard />} />
