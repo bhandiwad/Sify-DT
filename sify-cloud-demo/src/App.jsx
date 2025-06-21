@@ -161,7 +161,7 @@ function App() {
                 <Route path="/solution-architect-vetting" element={<SolutionArchitectVetting />} />
                 <Route path="/boq-generated" element={<BoQGenerated />} />
                 <Route path="/proposal-generated" element={<ProposalGenerated />} />
-                <Route path="/manual-entry" element={<ManualEntryWorkspace onBoQFinalized={handleBoQFinalized} />} />
+                <Route path="/manual-entry" element={<ManualEntryWorkspace onBoQFinalized={handleBoQFinalized} onProjectCreate={setProjectDetails} />} />
                 <Route path="/deployment" element={<DeploymentFlow />} />
                 <Route path="/portal" element={<PortalLayout inventory={customerInventory} />}>
                   <Route index element={<InventoryDashboard />} />

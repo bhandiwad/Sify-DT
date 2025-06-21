@@ -21,7 +21,7 @@ import ServiceConfigModal from './ServiceConfigModal';
 import { v4 as uuidv4 } from 'uuid';
 import { DEFAULT_SKU } from './BoQTable';
 
-export default function ManualEntryWorkspace() {
+export default function ManualEntryWorkspace({ onBoQFinalized, onProjectCreate }) {
   const location = useLocation();
   const navigate = useNavigate();
   const projectData = location.state?.projectData || {};
@@ -36,6 +36,20 @@ export default function ManualEntryWorkspace() {
   const [environments, setEnvironments] = useState({});
   
   const [configModal, setConfigModal] = useState({ open: false, envKey: null, service: null });
+  
+  // Create a dummy project on load to ensure project details are set in App.jsx
+  useState(() => {
+    if (onProjectCreate) {
+      const newProject = {
+        id: `PJ-${Date.now()}`,
+        projectName: "New Project from Manual Entry",
+        customerName: "Valued Customer",
+        status: 'Draft',
+        flowType: 'Standard',
+      };
+      onProjectCreate(newProject);
+    }
+  }, [onProjectCreate]);
   
   const findServiceDetails = (sku) => {
     for (const category of Object.values(SERVICE_CATEGORIES)) {
@@ -245,25 +259,22 @@ export default function ManualEntryWorkspace() {
       });
     });
     
-    // Navigate to BoQ page with the formatted items
-    navigate('/boq-generated', {
-      state: {
-        ...projectData,
-        boqItems,
-        environments: selectedEnvironments.reduce((acc, envKey) => ({
-          ...acc,
-          [envKey]: {
-            name: ENVIRONMENT_TYPES[envKey].name,
-            scalingFactor: ENVIRONMENT_TYPES[envKey].scalingFactor,
-            color: ENVIRONMENT_TYPES[envKey].color
-          }
-        }), {}),
-        compliance: complianceRequirements
-      }
-    });
+    // Call the callback from App.jsx to set the BoQ items
+    onBoQFinalized(boqItems);
+    
+    // Navigate to the main page where BoQGenerated will be shown
+    navigate('/');
   };
   
   const missingComplianceServices = getMissingComplianceServices();
+  
+  const allServices = useMemo(() => {
+    let services = [];
+    Object.entries(SERVICE_CATEGORIES).forEach(([key, category]) => {
+      services = [...services, ...category.services];
+    });
+    return services;
+  }, []);
   
   return (
     <div className="container mx-auto p-6 space-y-6">
