@@ -1,35 +1,44 @@
 import React, { useMemo } from 'react';
-import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, Sector } from 'recharts';
+import { useInventory } from './PortalLayout';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
-import { mockCustomerInventory } from '@/utils/mockInventoryData';
-import { LOCATIONS, SERVICE_CATEGORIES } from '@/utils/inventoryModel';
 
-const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#ff4d4d'];
+const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#ffc658'];
+
+const renderActiveShape = (props) => {
+// ... existing code ...
+};
 
 const CostManagement = () => {
+  const inventory = useInventory();
+  
   const { totalMrr, byCategory, byLocation } = useMemo(() => {
-    const allResources = mockCustomerInventory.subscriptions.flatMap(sub =>
-      sub.services.flatMap(service => service.resources)
+    if (!inventory) return { totalMrr: 0, byCategory: [], byLocation: [] };
+    
+    const allResources = inventory.subscriptions.flatMap(sub =>
+      sub.services.flatMap(s => s.resources)
     );
 
     const total = allResources.reduce((sum, resource) => sum + resource.mrr, 0);
 
-    const categoryCosts = Object.values(SERVICE_CATEGORIES).map(category => ({
-      name: category,
-      value: allResources
-        .filter(r => r.category === category)
-        .reduce((sum, r) => sum + r.mrr, 0),
-    })).filter(c => c.value > 0);
+    const categoryCosts = allResources.reduce((acc, resource) => {
+      acc[resource.category] = (acc[resource.category] || 0) + resource.mrr;
+      return acc;
+    }, {});
+    const categoryData = Object.entries(categoryCosts).map(([name, value]) => ({ name, value }));
+    
+    const locationCosts = allResources.reduce((acc, resource) => {
+      acc[resource.location] = (acc[resource.location] || 0) + resource.mrr;
+      return acc;
+    }, {});
+    const locationData = Object.entries(locationCosts).map(([name, value]) => ({ name, value }));
 
-    const locationCosts = Object.values(LOCATIONS).map(location => ({
-      name: location,
-      value: allResources
-        .filter(r => r.location.includes(location))
-        .reduce((sum, r) => sum + r.mrr, 0),
-    })).filter(l => l.value > 0);
+    return { totalMrr: total, byCategory: categoryData, byLocation: locationData };
+  }, [inventory]);
 
-    return { totalMrr: total, byCategory: categoryCosts, byLocation: locationCosts };
-  }, []);
+  if (!inventory) {
+    return <div>Loading inventory data...</div>;
+  }
 
   return (
     <div className="space-y-6">

@@ -10,7 +10,7 @@ import { ScrollArea } from './ui/scroll-area'
 import { ENVIRONMENT_TYPES, SERVICE_CATEGORIES, COMPLIANCE_REQUIREMENTS } from '../utils/serviceModel'
 import { Badge } from './ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table'
-import { Download, ArrowLeft, Shield, Server, Database, ArrowRight } from 'lucide-react'
+import { Download, ArrowLeft, Shield, Server, Database, ArrowRight, CheckCircle } from 'lucide-react'
 import { normalizeBoqItem } from '../utils/serviceModel'
 import { CATALOG, FLOOR_UNIT_PRICES, VM_OS_OPTIONS, VM_FEATURES } from '../utils/constants'
 import { DEFAULT_SKU } from './BoQTable'
@@ -95,14 +95,13 @@ function getFloorPrice(item) {
   return item.unitPrice || 0;
 }
 
-const BoQGenerated = () => {
-  const location = useLocation()
+const BoQGenerated = ({ items, projectDetails, onProvision }) => {
   const navigate = useNavigate()
   
-  const [projectData, setProjectData] = useState(null)
+  const [projectData, setProjectData] = useState(projectDetails)
   const [currentPersona, setCurrentPersona] = useState(() => {
     // Get persona from location state or localStorage, and map to short form
-    const persona = location.state?.currentPersona || getCurrentPersona()
+    const persona = getCurrentPersona()
     switch(persona) {
       case PERSONAS.ACCOUNT_MANAGER:
         return 'AM'
@@ -118,64 +117,18 @@ const BoQGenerated = () => {
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   // Initialize boqItems from the passed data or use defaults
-  const [boqItems, setBoqItems] = useState([])
+  const [boqItems, setBoqItems] = useState(items || [])
 
   useEffect(() => {
-    // Robust project loading: always prefer main projects list
-    let projectId = location.state?.projectId;
-    if (!projectId) {
-      // Try URL params
-      const params = new URLSearchParams(window.location.search);
-      projectId = params.get('projectId');
+    // This effect now primarily serves to sync if external `items` prop changes.
+    // Initial state is now set directly from props.
+    if (items) {
+      setBoqItems(items);
     }
-    if (!projectId) {
-      // Try localStorage currentProject
-      const currentProject = localStorage.getItem('currentProject');
-      if (currentProject) {
-        try {
-          const parsed = JSON.parse(currentProject);
-          projectId = parsed.id;
-        } catch (e) { /* ignore */ }
-      }
+    if (projectDetails) {
+      setProjectData(projectDetails);
     }
-    let loadedProject = null;
-    if (projectId) {
-      loadedProject = getProject(projectId);
-      if (loadedProject) {
-        setProjectData(loadedProject);
-        if (loadedProject.boqItems) {
-          const newItems = loadedProject.boqItems.map(item => {
-            const category = (item.category || 'COMPUTE').toUpperCase();
-            return {
-              ...normalizeBoqItem(item),
-              category,
-              sku: item.sku || DEFAULT_SKU[category] || DEFAULT_SKU['COMPUTE']
-            };
-          });
-          setBoqItems(newItems);
-          console.log('BoQGenerated: loaded project from main list', loadedProject);
-          console.log('BoQGenerated: loaded boqItems', newItems);
-          return;
-        }
-      }
-    }
-    // Fallback to location.state
-    if (location.state) {
-      setProjectData(location.state);
-      if (location.state.boqItems) {
-        const newItems = location.state.boqItems.map(item => {
-          const category = (item.category || 'COMPUTE').toUpperCase();
-          return {
-            ...normalizeBoqItem(item),
-            category,
-            sku: item.sku || DEFAULT_SKU[category] || DEFAULT_SKU['COMPUTE']
-          };
-        });
-        setBoqItems(newItems);
-        console.log('BoQGenerated: initialized boqItems from location.state', newItems);
-      }
-    }
-  }, [location.state]);
+  }, [items, projectDetails]);
 
   const [editingIndex, setEditingIndex] = useState(null)
   const [editValues, setEditValues] = useState({})
@@ -249,185 +202,148 @@ const BoQGenerated = () => {
   }
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">Bill of Quantities</h1>
-          <p className="text-muted-foreground">Review and finalize your infrastructure configuration</p>
-        </div>
-        <div className="flex items-center gap-4">
-          <span style={{ fontWeight: 500, color: '#374151', background: '#f3f4f6', borderRadius: 6, padding: '0.25rem 0.75rem', fontSize: 15 }}>
-            Role: {currentPersona === 'AM' ? 'Account Manager' : currentPersona === 'SA' ? 'Solution Architect' : currentPersona === 'PM' ? 'Product Manager' : currentPersona}
-          </span>
-          <Button variant="outline" onClick={() => navigate(-1)}>
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back
-          </Button>
-        </div>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Project Details</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 gap-4">
+    <div className="p-6 bg-gray-50 min-h-screen">
+      <Card className="max-w-7xl mx-auto shadow-lg">
+        <CardHeader className="bg-gray-100/50">
+          <div className="flex justify-between items-center">
             <div>
-              <p className="text-sm font-medium">Customer Name</p>
-              <p className="text-muted-foreground">{projectData.customerName}</p>
+              <CardTitle className="text-2xl text-gray-800">Bill of Quantities</CardTitle>
+              <CardDescription>Project: {projectData?.projectName || 'N/A'}</CardDescription>
             </div>
-            <div>
-              <p className="text-sm font-medium">Project Name</p>
-              <p className="text-muted-foreground">{projectData.projectName}</p>
-            </div>
-            <div>
-              <p className="text-sm font-medium">Deal ID</p>
-              <p className="text-muted-foreground">{projectData.dealId}</p>
+            <div className="flex items-center space-x-2">
+              <Button variant="outline" onClick={() => navigate(-1)}><ArrowLeft className="mr-2 h-4 w-4" /> Back</Button>
+              <Button variant="outline"><Download className="mr-2 h-4 w-4" /> Download PDF</Button>
+              <Button onClick={() => navigate('/proposal', { state: { ...projectData, boqItems: boqItems } })}>Generate Proposal <ArrowRight className="ml-2 h-4 w-4" /></Button>
+              <Button onClick={onProvision} variant="success" className="bg-green-600 hover:bg-green-700 text-white">
+                <CheckCircle className="mr-2 h-4 w-4" /> Provision Customer
+              </Button>
             </div>
           </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Resource Configuration</CardTitle>
         </CardHeader>
-        <CardContent>
-          <BoQTable
-            items={boqItems}
-            setItems={setBoqItems}
-            editable={projectData?.flowType === 'custom'
-              ? (currentPersona === 'AM' && (projectData?.status === 'Draft' || projectData?.status === 'Pending Solution Architect Review'))
-                || (currentPersona === 'PM' && projectData?.status === 'Pending Product Manager Review')
-              : true}
-            allowCustomSKU={projectData?.flowType !== 'custom'}
-            restrictEditToStandardSkus={projectData?.flowType === 'custom' && currentPersona === 'AM'}
-            restrictEditToCustomSkus={projectData?.flowType === 'custom' && currentPersona === 'PM'}
-            highlightNew={newlyAddedIndex}
-            onAddResource={(item) => {
-              setBoqItems(prev => [...prev, item]);
-              setNewlyAddedIndex(boqItems.length);
-              setTimeout(() => setNewlyAddedIndex(null), 2000);
-            }}
-            onEditResource={(idx, item) => {
-              const updated = [...boqItems];
-              updated[idx] = item;
-              setBoqItems(updated);
-            }}
-            onApprovalStatusChange={setApprovalRequired}
-            persona={currentPersona}
-            workflow={workflow}
-          />
+        <CardContent className="pt-6">
+          <Tabs defaultValue="technical">
+            <TabsList className="grid w-full grid-cols-4">
+              <TabsTrigger value="technical">Technical</TabsTrigger>
+              <TabsTrigger value="pricing">Pricing</TabsTrigger>
+              <TabsTrigger value="resources">Resources</TabsTrigger>
+              <TabsTrigger value="summary">Summary</TabsTrigger>
+            </TabsList>
+            <TabsContent value="technical">
+              <BoQTable
+                items={boqItems}
+                setItems={setBoqItems}
+                editable={projectData?.flowType === 'custom'
+                  ? (currentPersona === 'AM' && (projectData?.status === 'Draft' || projectData?.status === 'Pending Solution Architect Review'))
+                    || (currentPersona === 'PM' && projectData?.status === 'Pending Product Manager Review')
+                  : true}
+                allowCustomSKU={projectData?.flowType !== 'custom'}
+                restrictEditToStandardSkus={projectData?.flowType === 'custom' && currentPersona === 'AM'}
+                restrictEditToCustomSkus={projectData?.flowType === 'custom' && currentPersona === 'PM'}
+                highlightNew={newlyAddedIndex}
+                onAddResource={(item) => {
+                  setBoqItems(prev => [...prev, item]);
+                  setNewlyAddedIndex(boqItems.length);
+                  setTimeout(() => setNewlyAddedIndex(null), 2000);
+                }}
+                onEditResource={(idx, item) => {
+                  const updated = [...boqItems];
+                  updated[idx] = item;
+                  setBoqItems(updated);
+                }}
+                onApprovalStatusChange={setApprovalRequired}
+                persona={currentPersona}
+                workflow={workflow}
+              />
+            </TabsContent>
+            <TabsContent value="pricing">
+              <Table>
+                <TableBody>
+                  <TableRow>
+                    <TableCell>Subtotal</TableCell>
+                    <TableCell className="text-right">₹{totals.subtotal.toLocaleString()}</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>Contract Discount ({totals.contractDiscount}%)</TableCell>
+                    <TableCell className="text-right">-₹{totals.discountAmount.toLocaleString()}</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>Tax (18%)</TableCell>
+                    <TableCell className="text-right">₹{totals.tax.toLocaleString()}</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell className="font-bold">Total (Monthly)</TableCell>
+                    <TableCell className="text-right font-bold">₹{totals.monthlyTotal.toLocaleString()}</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell className="font-bold">Total (Annual)</TableCell>
+                    <TableCell className="text-right font-bold">₹{totals.annualTotal.toLocaleString()}</TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </TabsContent>
+            <TabsContent value="resources">
+              <Card style={{ boxShadow: '0 2px 16px rgba(0,0,0,0.07)', borderRadius: 16, marginBottom: 32 }}>
+                <CardHeader>
+                  <CardTitle>Resource Configuration</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium">Total VMs</p>
+                      <p className="text-2xl font-bold">{resources.totalVMs}</p>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium">Total vCPUs</p>
+                      <p className="text-2xl font-bold">{resources.totalCPU}</p>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium">Total RAM (GB)</p>
+                      <p className="text-2xl font-bold">{resources.totalRAM}</p>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium">Total Storage (GB)</p>
+                      <p className="text-2xl font-bold">{resources.totalStorage}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+            <TabsContent value="summary">
+              <Card style={{ boxShadow: '0 2px 16px rgba(0,0,0,0.07)', borderRadius: 16, marginBottom: 120 }}>
+                <CardHeader>
+                  <CardTitle>Pricing Summary</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <Table>
+                    <TableBody>
+                      <TableRow>
+                        <TableCell>Subtotal</TableCell>
+                        <TableCell className="text-right">₹{totals.subtotal.toLocaleString()}</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell>Contract Discount ({totals.contractDiscount}%)</TableCell>
+                        <TableCell className="text-right">-₹{totals.discountAmount.toLocaleString()}</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell>Tax (18%)</TableCell>
+                        <TableCell className="text-right">₹{totals.tax.toLocaleString()}</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell className="font-bold">Total (Monthly)</TableCell>
+                        <TableCell className="text-right font-bold">₹{totals.monthlyTotal.toLocaleString()}</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell className="font-bold">Total (Annual)</TableCell>
+                        <TableCell className="text-right font-bold">₹{totals.annualTotal.toLocaleString()}</TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
         </CardContent>
       </Card>
-
-      <Card style={{ boxShadow: '0 2px 16px rgba(0,0,0,0.07)', borderRadius: 16, marginBottom: 32 }}>
-        <CardHeader>
-          <CardTitle>Summary</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-            <div className="space-y-1">
-              <p className="text-sm font-medium">Total VMs</p>
-              <p className="text-2xl font-bold">{resources.totalVMs}</p>
-            </div>
-            <div className="space-y-1">
-              <p className="text-sm font-medium">Total vCPUs</p>
-              <p className="text-2xl font-bold">{resources.totalCPU}</p>
-            </div>
-            <div className="space-y-1">
-              <p className="text-sm font-medium">Total RAM (GB)</p>
-              <p className="text-2xl font-bold">{resources.totalRAM}</p>
-            </div>
-            <div className="space-y-1">
-              <p className="text-sm font-medium">Total Storage (GB)</p>
-              <p className="text-2xl font-bold">{resources.totalStorage}</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card style={{ boxShadow: '0 2px 16px rgba(0,0,0,0.07)', borderRadius: 16, marginBottom: 120 }}>
-        <CardHeader>
-          <CardTitle>Pricing Summary</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableBody>
-              <TableRow>
-                <TableCell>Subtotal</TableCell>
-                <TableCell className="text-right">₹{totals.subtotal.toLocaleString()}</TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell>Contract Discount ({totals.contractDiscount}%)</TableCell>
-                <TableCell className="text-right">-₹{totals.discountAmount.toLocaleString()}</TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell>Tax (18%)</TableCell>
-                <TableCell className="text-right">₹{totals.tax.toLocaleString()}</TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell className="font-bold">Total (Monthly)</TableCell>
-                <TableCell className="text-right font-bold">₹{totals.monthlyTotal.toLocaleString()}</TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell className="font-bold">Total (Annual)</TableCell>
-                <TableCell className="text-right font-bold">₹{totals.annualTotal.toLocaleString()}</TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-
-      {projectData?.flowType === 'custom' && currentPersona === 'AM' && (projectData?.status === 'Draft' || projectData?.status === 'Pending Solution Architect Review') && (
-        <div className="flex justify-end mt-8 mb-4">
-          <Button
-            onClick={() => {
-              // Update project status and navigate
-              const updatedProject = { ...projectData, status: 'Pending Solution Architect Review', boqItems };
-              localStorage.setItem('currentProject', JSON.stringify(updatedProject));
-              navigate('/solution-architect-vetting', { state: { projectId: updatedProject.id, currentPersona: 'SA' } });
-            }}
-            style={{ background: '#2563eb', color: 'white', fontWeight: 800, fontSize: 20, borderRadius: 10, padding: '1.25rem 3rem', boxShadow: '0 4px 16px rgba(37,99,235,0.15)', letterSpacing: 0.5, display: 'flex', alignItems: 'center', gap: 12 }}
-          >
-            <ArrowRight className="w-6 h-6 mr-2" />
-            Send to Solution Architect for Review
-          </Button>
-        </div>
-      )}
-
-      {/* Sticky bottom bar for actions */}
-      <div style={{
-        position: 'fixed',
-        left: 0,
-        bottom: 0,
-        width: '100%',
-        background: 'rgba(255,255,255,0.98)',
-        boxShadow: '0 -2px 16px rgba(0,0,0,0.07)',
-        padding: '1rem 0',
-        zIndex: 100,
-        display: 'flex',
-        justifyContent: 'center',
-        gap: 16,
-      }}>
-        <Button variant="outline" style={{ minWidth: 120, fontWeight: 500, fontSize: 16 }}>
-          <Download className="w-4 h-4 mr-2" />
-          Export
-        </Button>
-        {boqItems.some(item => item.askPrice !== undefined && item.askPrice !== item.unitPrice) && (
-          <Button variant="secondary" onClick={approveAskPrice} style={{ minWidth: 180, fontWeight: 500, fontSize: 16 }}>
-            Approve Ask Price
-          </Button>
-        )}
-        <Button
-          onClick={() => navigate('/proposal-generated', { state: { ...projectData, boqItems, totals, projectId: projectData.id } })}
-          disabled={projectData?.flowType === 'custom' && projectData?.status !== 'Approved' && projectData?.status !== 'Pending Finance Approval'}
-          style={{ minWidth: 240, fontWeight: 700, fontSize: 18, background: '#2563eb', color: 'white', borderRadius: 8, boxShadow: '0 2px 8px rgba(37,99,235,0.08)', opacity: (projectData?.flowType === 'custom' && projectData?.status !== 'Approved' && projectData?.status !== 'Pending Finance Approval') ? 0.6 : 1, cursor: (projectData?.flowType === 'custom' && projectData?.status !== 'Approved' && projectData?.status !== 'Pending Finance Approval') ? 'not-allowed' : 'pointer' }}
-          title={projectData?.flowType === 'custom' && projectData?.status !== 'Approved' && projectData?.status !== 'Pending Finance Approval' ? 'Complete the workflow and get all approvals before generating the proposal.' : ''}
-        >
-          Generate Proposal
-        </Button>
-      </div>
     </div>
   )
 }
