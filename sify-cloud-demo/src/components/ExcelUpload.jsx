@@ -20,7 +20,7 @@ import {
   ESSENTIAL_SERVICES
 } from '@/utils/dataModel'
 
-const ExcelUpload = () => {
+const ExcelUpload = ({ onBoQFinalized, onProjectCreate }) => {
   const location = useLocation()
   const navigate = useNavigate()
   
@@ -35,8 +35,18 @@ const ExcelUpload = () => {
   const [error, setError] = useState(null)
 
   useEffect(() => {
-    initializeComponent()
-  }, [location])
+    // For this demo, we'll create a dummy project on component load
+    // if one doesn't exist. In a real app, you'd navigate here *with* a project.
+    const newProject = {
+      id: `PJ-${Date.now()}`,
+      projectName: "New Project from Excel",
+      customerName: "Valued Customer",
+      status: PROJECT_STATUS.DRAFT,
+      flowType: FLOW_TYPES.STANDARD, // will be updated after processing
+    };
+    setProjectData(newProject);
+    onProjectCreate(newProject); // Set project details in App state immediately
+  }, []);
 
   const initializeComponent = () => {
     try {
@@ -218,54 +228,38 @@ const ExcelUpload = () => {
       await new Promise(resolve => setTimeout(resolve, 1000))
 
       // Update project with match results
-      const customBoqItems = finalResults.unmatched.map(item => ({
-        ...item,
-        sku: 'CI-CUSTOM',
-        category: 'CUSTOM',
-        unitPrice: 5000,
-        totalPrice: 5000 * (item.quantity || 1),
-      }));
-      const updatedProject = updateProject(projectData.id, {
-        matchedItems: finalResults.matched,
-        unmatchedItems: finalResults.unmatched,
-        essentialServices: finalResults.matched.filter(item => item.essential),
-        boqItems: [
-          ...finalResults.matched.map(item => ({
-            ...item,
-            unitPrice: item.matchedSKU?.basePrice || 0,
-            totalPrice: (item.matchedSKU?.basePrice || 0) * (item.quantity || 1)
-          })),
-          ...customBoqItems
-        ],
-        flowType: finalResults.unmatched.length > 0 ? FLOW_TYPES.CUSTOM : FLOW_TYPES.STANDARD,
-        status: getNextStatus(PROJECT_STATUS.DRAFT, finalResults.unmatched.length > 0 ? FLOW_TYPES.CUSTOM : FLOW_TYPES.STANDARD)
-      })
+      const boqItems = [
+        ...finalResults.matched.map(item => ({
+          ...item,
+          sku: item.matchedSKU.sku,
+          config: {}, // Can be expanded
+          unitPrice: item.matchedSKU?.basePrice || 0,
+          totalPrice: (item.matchedSKU?.basePrice || 0) * (item.quantity || 1)
+        })),
+        ...finalResults.unmatched.map(item => ({
+          ...item,
+          sku: 'CI-CUSTOM',
+          category: 'CUSTOM',
+          config: {}, // Can be expanded
+          unitPrice: 5000, // Placeholder price
+          totalPrice: 5000 * (item.quantity || 1),
+        }))
+      ];
+      
+      onBoQFinalized(boqItems);
 
       setIsProcessing(false)
 
-      // Auto-navigate based on results and workflow
+      // Auto-navigate to the main page where BoQGenerated will be shown
       setTimeout(() => {
-        try {
-          const navigationState = {
-            ...updatedProject,
-            projectId: updatedProject.id,
-            matchResults: finalResults,
-            currentPersona: getCurrentPersona()
-          }
-          // Always go to BoQ Generated for AM review first
-          navigate('/boq-generated', { state: navigationState })
-        } catch (navError) {
-          console.error('Navigation error:', navError)
-          setError('Navigation failed. Please try again.')
-          setIsProcessing(false)
-        }
-      }, 1500)
+        navigate('/');
+      }, 1200);
 
-    } catch (error) {
-      console.error('Processing error:', error)
+    } catch (err) {
+      console.error("Processing Error:", err)
+      setError(err.message || 'An unexpected error occurred during processing.')
       setIsProcessing(false)
       setProcessingStep('')
-      setError('Failed to process requirements. Please try again.')
     }
   }
 

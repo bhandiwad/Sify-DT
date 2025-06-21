@@ -155,13 +155,13 @@ function App() {
                 <Route path="/" element={<Navigate to="/dashboard" replace />} />
                 <Route path="/dashboard" element={<Dashboard currentPersona={currentPersona} />} />
                 <Route path="/new-project" element={<NewProject />} />
-                <Route path="/excel-upload" element={<ExcelUpload />} />
+                <Route path="/excel-upload" element={<ExcelUpload onBoQFinalized={handleBoQFinalized} onProjectCreate={setProjectDetails} />} />
                 <Route path="/project-details/:projectId" element={<ProjectDetails />} />
                 <Route path="/product-manager-review" element={<ProductManagerReview />} />
                 <Route path="/solution-architect-vetting" element={<SolutionArchitectVetting />} />
                 <Route path="/boq-generated" element={<BoQGenerated />} />
                 <Route path="/proposal-generated" element={<ProposalGenerated />} />
-                <Route path="/manual-entry" element={<ManualEntryWorkspace />} />
+                <Route path="/manual-entry" element={<ManualEntryWorkspace onBoQFinalized={handleBoQFinalized} />} />
                 <Route path="/deployment" element={<DeploymentFlow />} />
                 <Route path="/portal" element={<PortalLayout inventory={customerInventory} />}>
                   <Route index element={<InventoryDashboard />} />
