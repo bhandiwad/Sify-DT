@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -35,16 +35,20 @@ import {
   PERSONAS,
   FLOW_TYPES
 } from '@/utils/dataModel'
+import { useInventory } from '@/context/InventoryContext'
+import { maxHealthSifyInventory } from '@/utils/mockSifyInventory'
+import { maxHealthAwsInventory } from '@/utils/mockAwsInventory'
+import { maxHealthGcpInventory } from '@/utils/mockGcpInventory'
 
-const Dashboard = ({ onNewProject }) => {
+const Dashboard = () => {
   const [projects, setProjects] = useState([])
-  const [currentPersona, setCurrentPersona] = useState(getCurrentPersona())
+  const [currentPersona, setCurrentPersonaState] = useState(getCurrentPersona())
   const [selectedDemoType, setSelectedDemoType] = useState(FLOW_TYPES.STANDARD)
   const navigate = useNavigate()
+  const { setInventory } = useInventory();
 
   useEffect(() => {
     setCurrentPersona(PERSONAS.ACCOUNT_MANAGER);
-    setCurrentPersona(PERSONAS.ACCOUNT_MANAGER); // set in localStorage
     loadProjects()
   }, [])
 
@@ -55,22 +59,25 @@ const Dashboard = ({ onNewProject }) => {
 
   const handlePersonaChange = (persona) => {
     setCurrentPersona(persona)
+    setCurrentPersonaState(persona)
     loadProjects() // Reload to update action buttons
   }
 
   const handleResetDemo = () => {
     if (clearDemoData()) {
       setProjects([])
-      // Show success message or reload
       window.location.reload()
     }
   }
 
   const handleNewProject = () => {
-    // Store selected demo type for the new project
     localStorage.setItem('selectedDemoType', selectedDemoType)
-    // Call the handler from App.jsx to change the view
-    onNewProject();
+    navigate('/new-project');
+  }
+
+  const handleViewInventory = (inventoryData, path) => {
+    setInventory(inventoryData);
+    navigate(path);
   }
 
   const handleProjectAction = (project) => {
@@ -132,7 +139,6 @@ const Dashboard = ({ onNewProject }) => {
     )
   }
 
-  // Mock statistics
   const stats = {
     activeProjects: projects.filter(p => p.status !== PROJECT_STATUS.APPROVED).length,
     monthlyRevenue: '₹2.4M',
@@ -142,7 +148,6 @@ const Dashboard = ({ onNewProject }) => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
       <div className="bg-white border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-4">
@@ -159,14 +164,13 @@ const Dashboard = ({ onNewProject }) => {
                 <RotateCcw className="h-4 w-4" />
                 Reset Demo
               </Button>
-              <PersonaSwitcher onPersonaChange={handlePersonaChange} />
+              <PersonaSwitcher onPersonaChange={handlePersonaChange} currentPersona={currentPersona} />
             </div>
           </div>
         </div>
       </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {/* Demo Type Selection */}
         <Card className="mb-6">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -224,7 +228,6 @@ const Dashboard = ({ onNewProject }) => {
           </CardContent>
         </Card>
 
-        {/* Statistics Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -239,12 +242,12 @@ const Dashboard = ({ onNewProject }) => {
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">This Month Revenue</CardTitle>
+              <CardTitle className="text-sm font-medium">Monthly Revenue</CardTitle>
               <DollarSign className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{stats.monthlyRevenue}</div>
-              <p className="text-xs text-muted-foreground">+15% this month</p>
+              <p className="text-xs text-muted-foreground">+5.2% this month</p>
             </CardContent>
           </Card>
 
@@ -255,93 +258,99 @@ const Dashboard = ({ onNewProject }) => {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{stats.avgProcessingTime}</div>
-              <p className="text-xs text-muted-foreground">-65% improvement</p>
+              <p className="text-xs text-muted-foreground">-1 min from last month</p>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Success Rate</CardTitle>
-              <TrendingUp className="h-4 w-4 text-muted-foreground" />
+              <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{stats.successRate}</div>
-              <p className="text-xs text-muted-foreground">+12% this quarter</p>
+              <p className="text-xs text-muted-foreground">99%+ is the goal</p>
             </CardContent>
           </Card>
         </div>
 
-        {/* Projects List */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Building2 className="h-5 w-5" />
-              My Customer Projects
-            </CardTitle>
-            <CardDescription>
-              Manage and track your customer projects across different workflow stages
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {projects.length === 0 ? (
-              <div className="text-center py-8">
-                <Building2 className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">No projects yet</h3>
-                <p className="text-gray-600 mb-4">Create your first project to get started with the demo</p>
-                <Button onClick={handleNewProject} className="bg-blue-600 hover:bg-blue-700">
-                  <Plus className="h-4 w-4 mr-2" />
-                  Create New Project
-                </Button>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {projects.map((project) => (
-                  <div key={project.id} className="border rounded-lg p-4 hover:bg-gray-50 transition-colors">
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
-                          <Building2 className="h-5 w-5 text-gray-400" />
-                          <h3 className="font-medium text-gray-900">{project.customerName}</h3>
-                          <Badge className={getStatusColor(project.status)}>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2">
+            <Card>
+              <CardHeader>
+                <CardTitle>Active Projects</CardTitle>
+                <CardDescription>
+                  Overview of all ongoing projects and their current status.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {projects.length > 0 ? (
+                  <ul className="space-y-4">
+                    {projects.map(project => (
+                      <li key={project.id} className="p-4 border rounded-lg flex justify-between items-center hover:bg-gray-50">
+                        <div>
+                          <p className="font-semibold text-lg">{project.name} for {project.customerName}</p>
+                          <p className="text-sm text-gray-600">
+                            Created: {project.createdDate} | Last Update: {project.lastUpdated}
+                          </p>
+                          <Badge className={`mt-2 ${getStatusColor(project.status)}`}>
                             {project.status}
                           </Badge>
-                          <Badge variant="outline" className="text-xs">
-                            {project.flowType === FLOW_TYPES.STANDARD ? 'Standard' : 'Custom'} Flow
-                          </Badge>
                         </div>
-                        <p className="text-gray-600 mb-2">{project.projectName}</p>
-                        <div className="flex items-center gap-4 text-sm text-gray-500">
-                          <span className="flex items-center gap-1">
-                            <Calendar className="h-4 w-4" />
-                            Created: {new Date(project.createdDate).toLocaleDateString()}
-                          </span>
-                          {project.totals.total > 0 && (
-                            <span className="flex items-center gap-1">
-                              <DollarSign className="h-4 w-4" />
-                              Estimated: ₹{project.totals.total.toLocaleString()}/month
-                            </span>
-                          )}
-                          {project.contractTerm && (
-                            <span className="text-xs bg-gray-100 px-2 py-1 rounded">
-                              {project.contractTerm.replace('_', ' ').toUpperCase()} Contract
-                            </span>
-                          )}
+                        <div className="flex items-center gap-2">
+                          {getActionButton(project)}
+                          <Button variant="ghost" size="sm" onClick={() => navigate(`/project-details/${project.id}`)}>
+                             <Edit className="h-4 w-4 mr-1" /> Details
+                          </Button>
                         </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {getActionButton(project)}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                   <Alert>
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertDescription>
+                      No active projects. Click "Create New Project" to get started.
+                    </AlertDescription>
+                  </Alert>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+          
+          <div className="lg:col-span-1 space-y-6">
+             <Card className="col-span-1 md:col-span-2 lg:col-span-3">
+              <CardHeader>
+                <CardTitle>Enterprise Customer View: Max Health</CardTitle>
+                <CardDescription>
+                  Simulate viewing a large, existing customer's hybrid cloud inventory.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                 <p className="text-sm text-gray-600">
+                    Max Health uses a hybrid model with a primary data center at Sify (Mumbai), disaster recovery at Sify (Chennai), and specific AI/ML workloads running on AWS and GCP, all interconnected via Sify Cloud Connect.
+                 </p>
+              </CardContent>
+              <CardFooter className="flex justify-between">
+                <Button variant="outline" onClick={() => handleViewInventory(maxHealthSifyInventory, '/inventory/sify')}>
+                  <Eye className="mr-2 h-4 w-4" /> View Sify Inventory
+                </Button>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="ghost" onClick={() => handleViewInventory(maxHealthAwsInventory, '/inventory/aws')}>
+                    AWS
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => handleViewInventory(maxHealthGcpInventory, '/inventory/gcp')}>
+                    GCP
+                  </Button>
+                </div>
+              </CardFooter>
+            </Card>
+          </div>
+        </div>
       </div>
     </div>
-  )
+  );
 }
 
-export default Dashboard
+export default Dashboard;
 
