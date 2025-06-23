@@ -1,245 +1,112 @@
-import { useState, useEffect } from 'react'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Badge } from '@/components/ui/badge'
-import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Progress } from '@/components/ui/progress'
-import { Upload, FileSpreadsheet, CheckCircle2, AlertTriangle, Clock, ArrowRight, Info, AlertCircle } from 'lucide-react'
-import PersonaSwitcher from './PersonaSwitcher'
-import { 
-  getProject, 
-  updateProject, 
-  getCurrentPersona,
-  getNextStatus,
-  FLOW_TYPES,
-  PROJECT_STATUS,
-  PRICE_BOOK_SKUS,
-  ESSENTIAL_SERVICES
-} from '@/utils/dataModel'
+import { Upload, FileSpreadsheet, CheckCircle2, AlertTriangle, ArrowRight, AlertCircle } from 'lucide-react'
+import { ESSENTIAL_SERVICES } from '@/utils/dataModel'
+import { SERVICE_CATEGORIES as SERVICE_CATALOG } from '@/utils/serviceModel';
+import { getPrice, generateInternalCode, findServiceByKeywords, parseVmConfig } from '@/utils/boqUtils';
 
 const ExcelUpload = ({ onBoQFinalized, projectDetails }) => {
-  const location = useLocation()
-  const navigate = useNavigate()
-  
-  const [file, setFile] = useState(null)
-  const [isProcessing, setIsProcessing] = useState(false)
-  const [processingStep, setProcessingStep] = useState('')
-  const [progress, setProgress] = useState(0)
-  const [skuMatchResults, setSkuMatchResults] = useState(null)
-  const [currentPersona, setCurrentPersona] = useState(getCurrentPersona())
-  const [error, setError] = useState(null)
-
-  const handlePersonaChange = (persona) => {
-    setCurrentPersona(persona)
-  }
-
-  // Enhanced scenario data based on flow type
-  const getScenarioExcelData = () => {
-    if (projectDetails.flowType === FLOW_TYPES.STANDARD) {
-      // Standard scenario - all items will match SKUs
-      return [
-        { description: 'Application Server Windows 4 vCPU 8GB RAM', quantity: 3, notes: 'For web application hosting' },
-        { description: 'Database Server Windows 8 vCPU 16GB RAM', quantity: 1, notes: 'SQL Server hosting' },
-        { description: 'Load Balancer Standard', quantity: 1, notes: 'Traffic distribution' },
-        { description: 'Enterprise Firewall', quantity: 1, notes: 'Network security' },
-        { description: 'SSD Storage 100GB', quantity: 4, notes: 'High-performance storage' },
-        { description: 'Standard Antivirus', quantity: 4, notes: 'Security protection' }
-      ]
-    } else {
-      // Custom scenario - mixed standard and custom items
-      return [
-        { description: 'Application Server Windows 4 vCPU 8GB RAM', quantity: 3, notes: 'For web application hosting' },
-        { description: 'Database Server Windows 8 vCPU 16GB RAM', quantity: 1, notes: 'SQL Server hosting' },
-        { description: 'Load Balancer Standard', quantity: 1, notes: 'Traffic distribution' },
-        { description: 'Enterprise Firewall', quantity: 1, notes: 'Network security' },
-        { description: 'VDI Desktop as a Service 50 users', quantity: 1, notes: 'Virtual desktop infrastructure for remote work' },
-        { description: 'Custom AI/ML Analytics Platform with GPU acceleration', quantity: 1, notes: 'Machine learning workloads with NVIDIA A100 GPUs' },
-        { description: 'Managed Kubernetes Service with auto-scaling', quantity: 1, notes: 'Container orchestration platform' }
-      ]
-    }
-  }
-
-  const matchSKUs = (excelData) => {
-    const matched = []
-    const unmatched = []
-
-    excelData.forEach((row, index) => {
-      const description = row.description.toLowerCase()
-      let matchFound = false
-
-      // Enhanced matching logic with internal SKU codes
-      for (const sku of PRICE_BOOK_SKUS) {
-        const skuName = sku.name.toLowerCase()
-        
-        let hasMatch = false
-        
-        if (description.includes('application server') && description.includes('4 vcpu') && skuName.includes('windows vm 4vcpu')) {
-          hasMatch = true
-        } else if (description.includes('database server') && description.includes('8 vcpu') && skuName.includes('windows vm 8vcpu')) {
-          hasMatch = true
-        } else if (description.includes('load balancer') && description.includes('standard') && skuName.includes('standard load balancer')) {
-          hasMatch = true
-        } else if (description.includes('enterprise firewall') && skuName.includes('enterprise firewall')) {
-          hasMatch = true
-        } else if (description.includes('standard antivirus') && skuName.includes('standard antivirus')) {
-          hasMatch = true
-        } else if (description.includes('ssd storage') && description.includes('100gb') && skuName.includes('ssd storage 100gb')) {
-          hasMatch = true
-        }
-
-        if (hasMatch) {
-          matched.push({
-            ...row,
-            matchedSKU: sku,
-            confidence: 0.95,
-            index,
-            internalCode: sku.internalCode,
-            category: sku.category
-          })
-          matchFound = true
-          break
-        }
-      }
-
-      if (!matchFound) {
-        unmatched.push({
-          ...row,
-          reason: 'No matching SKU found in price book - requires custom SKU creation',
-          index,
-          category: 'Custom',
-          suggestedInternalCode: `CUSTOM-${String(index + 1).padStart(3, '0')}`
-        })
-      }
-    })
-
-    return { matched, unmatched }
-  }
-
-  const addEssentialServices = (matchedItems) => {
-    const essentials = []
-    
-    ESSENTIAL_SERVICES.forEach(essential => {
-      const sku = PRICE_BOOK_SKUS.find(s => s.sku === essential.sku)
-      if (sku) {
-        essentials.push({
-          description: sku.name,
-          quantity: essential.quantity,
-          notes: essential.reason,
-          matchedSKU: sku,
-          confidence: 1.0,
-          internalCode: sku.internalCode,
-          category: sku.category,
-          autoAdded: true,
-          essential: true
-        })
-      }
-    })
-    
-    return [...matchedItems, ...essentials]
-  }
+  const navigate = useNavigate();
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingStep, setProcessingStep] = useState('');
+  const [progress, setProgress] = useState(0);
+  const [error, setError] = useState(null);
 
   const processFile = async () => {
-    if (!projectDetails) {
-      setError('No project data available. Please start from the dashboard.')
-      return
-    }
+    setIsProcessing(true);
+    setProgress(0);
+    setError(null);
 
-    setIsProcessing(true)
-    setProgress(0)
-    setError(null)
+    const boqItems = [];
+    const excelData = getScenarioExcelData(projectDetails.flowType);
 
+    // --- Main Processing Logic ---
     try {
-      // Step 1: File Upload
-      setProcessingStep('Uploading file...')
-      setProgress(20)
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      setProcessingStep('Parsing and matching services...');
+      await new Promise(r => setTimeout(r, 500));
+      setProgress(50);
 
-      // Step 2: Parse Excel
-      setProcessingStep('Parsing Excel data...')
-      setProgress(40)
-      await new Promise(resolve => setTimeout(resolve, 1500))
+      excelData.forEach(row => {
+        const desc = row.description.toLowerCase();
+        const service = findServiceByKeywords(desc);
 
-      // Step 3: SKU Matching
-      setProcessingStep('Matching against price-book SKUs...')
-      setProgress(60)
-      await new Promise(resolve => setTimeout(resolve, 2000))
+        if (service) {
+          let config = {};
+          if (service.sku.includes('COMPUTE')) {
+            config = parseVmConfig(row.description);
+          }
+          
+          const unitPrice = getPrice(service, config);
+          
+          boqItems.push({
+            sku: service.sku,
+            internalCode: generateInternalCode(service, config),
+            description: row.description,
+            quantity: row.quantity,
+            config: config,
+            unitPrice: unitPrice,
+            totalPrice: unitPrice * row.quantity,
+          });
+        }
+      });
 
-      const results = matchSKUs(getScenarioExcelData())
+      setProcessingStep('Adding essential services...');
+      await new Promise(r => setTimeout(r, 500));
+      setProgress(80);
+
+      ESSENTIAL_SERVICES.forEach(essential => {
+          const service = findServiceByKeywords(essential.sku.toLowerCase().replace('-', ' '));
+          if(service) {
+            const unitPrice = getPrice(service, {});
+            boqItems.push({
+                sku: service.sku,
+                internalCode: service.sku,
+                description: service.label,
+                quantity: essential.quantity,
+                config: {},
+                unitPrice: unitPrice,
+                totalPrice: unitPrice * essential.quantity,
+                autoAdded: true,
+                notes: essential.reason
+            });
+          }
+      });
       
-      // Step 4: Add Essential Services
-      setProcessingStep('Adding essential services...')
-      setProgress(80)
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
-      const enhancedMatched = addEssentialServices(results.matched)
-      const finalResults = { matched: enhancedMatched, unmatched: results.unmatched }
-      
-      setSkuMatchResults(finalResults)
+      setProcessingStep('Finalizing BoQ...');
+      await new Promise(r => setTimeout(r, 500));
+      setProgress(100);
 
-      // Step 5: Analysis Complete
-      setProcessingStep('Analysis complete')
-      setProgress(100)
-      await new Promise(resolve => setTimeout(resolve, 1000))
-
-      // Update project with match results
-      const boqItems = [
-        ...finalResults.matched.map(item => ({
-          ...item,
-          sku: item.matchedSKU.sku,
-          config: {}, // Can be expanded
-          unitPrice: item.matchedSKU?.basePrice || 0,
-          totalPrice: (item.matchedSKU?.basePrice || 0) * (item.quantity || 1)
-        })),
-        ...finalResults.unmatched.map(item => ({
-          ...item,
-          sku: 'CI-CUSTOM',
-          category: 'CUSTOM',
-          config: {}, // Can be expanded
-          unitPrice: 5000, // Placeholder price
-          totalPrice: 5000 * (item.quantity || 1),
-        }))
-      ];
-      
       onBoQFinalized(boqItems);
-
-      setIsProcessing(false)
-
-      // Auto-navigate to the main page where BoQGenerated will be shown
-      setTimeout(() => {
-        navigate('/');
-      }, 1200);
+      navigate('/');
 
     } catch (err) {
-      console.error("Processing Error:", err)
-      setError(err.message || 'An unexpected error occurred during processing.')
-      setIsProcessing(false)
-      setProcessingStep('')
+      console.error("Processing Error:", err);
+      setError("An unexpected error occurred during processing.");
+      setIsProcessing(false);
     }
-  }
-
-  if (error) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <Card className="max-w-md">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-red-600">
-              <AlertCircle className="h-5 w-5" />
-              Error
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-gray-600 mb-4">{error}</p>
-            <Button onClick={() => navigate('/dashboard')} className="w-full">
-              Return to Dashboard
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    )
-  }
+  };
+  
+  // This is a simplified mock function for the demo
+  const getScenarioExcelData = (flowType) => {
+    if (flowType === 'standard') {
+      return [
+        { description: 'Compute Instance 4 vCPU 8GB RAM Windows', quantity: 3 },
+        { description: 'Compute Instance 8 vCPU 16GB RAM Windows', quantity: 1 },
+        { description: 'Block Storage 100GB SSD', quantity: 4 },
+        { description: 'Enterprise Firewall', quantity: 1 },
+      ];
+    }
+    return [ // Custom flow
+        { description: 'Compute Instance 4 vCPU 8GB RAM Windows', quantity: 2 },
+        { description: 'VDI Desktop as a Service 50 users', quantity: 1 },
+        { description: 'Managed Kubernetes Service', quantity: 1 },
+    ];
+  };
 
   if (!projectDetails) {
     return (
@@ -259,159 +126,51 @@ const ExcelUpload = ({ onBoQFinalized, projectDetails }) => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-4">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">Requirement Intake</h1>
-              <p className="text-gray-600">Upload customer requirements and match against price-book SKUs</p>
-            </div>
-            <PersonaSwitcher onPersonaChange={handlePersonaChange} />
+    <div className="max-w-4xl mx-auto p-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>Upload Requirements</CardTitle>
+          <CardDescription>
+            Upload the customer's requirements Excel file to automatically generate a BoQ.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="grid grid-cols-2 gap-6 text-sm">
+              <div>
+                  <Label>Customer</Label>
+                  <p className="font-semibold">{projectDetails.customerName}</p>
+              </div>
+              <div>
+                  <Label>Project Name</Label>
+                  <p className="font-semibold">{projectDetails.projectName}</p>
+              </div>
           </div>
-        </div>
-      </div>
+          
+          <div className="p-4 bg-blue-50 rounded-lg text-center">
+            <p className="text-sm text-blue-800">
+              For this demo, we will use a pre-defined scenario based on your demo type selection.
+            </p>
+            <p className="text-xs text-blue-600 mt-1">
+              <strong>Demo Mode:</strong> '{projectDetails.flowType}' workflow selected.
+            </p>
+          </div>
 
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {/* Project Info Card */}
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <FileSpreadsheet className="h-5 w-5" />
-              New Opportunity Workspace
-            </CardTitle>
-            <CardDescription>
-              Upload Excel requirements and tag with deal ID for SKU matching
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="customer">Customer</Label>
-                <Input 
-                  id="customer" 
-                  value={projectDetails.customerName} 
-                  disabled 
-                  className="bg-gray-50"
-                />
-              </div>
-              <div>
-                <Label htmlFor="dealId">Deal ID *</Label>
-                <Input 
-                  id="dealId" 
-                  value={projectDetails.id} 
-                  disabled 
-                  className="bg-gray-50"
-                />
-              </div>
-              <div>
-                <Label htmlFor="projectName">Project Name</Label>
-                <Input 
-                  id="projectName" 
-                  value={projectDetails.projectName} 
-                  disabled 
-                  className="bg-gray-50"
-                />
-              </div>
-              <div>
-                <Label htmlFor="contractTerm">Contract Term</Label>
-                <Input 
-                  id="contractTerm" 
-                  value={projectDetails.contractTerm?.replace('_', ' ').toUpperCase() || 'ANNUAL'} 
-                  disabled 
-                  className="bg-gray-50"
-                />
-              </div>
+          {isProcessing ? (
+            <div className="space-y-2">
+                <Progress value={progress} />
+                <p className="text-sm text-center text-gray-600">{processingStep}</p>
             </div>
-          </CardContent>
-        </Card>
+          ) : (
+            <Button onClick={processFile} className="w-full">
+              <Upload className="mr-2 h-4 w-4" /> Start Processing
+            </Button>
+          )}
 
-        {/* Upload Card */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Requirements Upload</CardTitle>
-            <CardDescription>
-              Upload Excel file with service requirements for automatic SKU matching
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {!isProcessing ? (
-              <div className="space-y-6">
-                {/* File Upload Area */}
-                <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-gray-400 transition-colors">
-                  <Upload className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-lg font-medium text-gray-900 mb-2">
-                    Drop your Excel file here, or <button className="text-blue-600 hover:text-blue-700">browse</button>
-                  </p>
-                  <p className="text-sm text-gray-600">Supports .xlsx and .csv files up to 10MB</p>
-                  
-                  {/* Demo Info */}
-                  <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-                    <p className="text-sm text-blue-800">
-                      <strong>Demo Mode:</strong> {projectDetails.flowType === FLOW_TYPES.STANDARD ? 'Standard' : 'Custom'} workflow selected
-                    </p>
-                    <p className="text-xs text-blue-600 mt-1">
-                      {projectDetails.flowType === FLOW_TYPES.STANDARD 
-                        ? 'All services will match existing SKUs for fast processing'
-                        : 'Mixed services will trigger full approval workflow'
-                      }
-                    </p>
-                  </div>
-                </div>
-
-                {/* Process Button */}
-                <Button 
-                  onClick={processFile}
-                  className="w-full bg-orange-600 hover:bg-orange-700 text-white py-3"
-                  size="lg"
-                >
-                  Process Requirements & Match SKUs
-                </Button>
-              </div>
-            ) : (
-              <div className="space-y-6">
-                {/* Processing Status */}
-                <div className="text-center">
-                  <div className="flex items-center justify-center gap-2 mb-4">
-                    <Clock className="h-5 w-5 text-blue-600 animate-spin" />
-                    <span className="text-lg font-medium">{processingStep}</span>
-                  </div>
-                  <Progress value={progress} className="w-full h-3" />
-                  <p className="text-sm text-gray-600 mt-2">{progress}% complete</p>
-                </div>
-
-                {/* Processing Steps */}
-                <div className="space-y-3">
-                  <div className={`flex items-center gap-3 p-3 rounded-lg ${progress >= 20 ? 'bg-green-50 text-green-800' : 'bg-gray-50 text-gray-600'}`}>
-                    {progress >= 20 ? <CheckCircle2 className="h-5 w-5" /> : <Clock className="h-5 w-5" />}
-                    <span>File Upload</span>
-                  </div>
-                  <div className={`flex items-center gap-3 p-3 rounded-lg ${progress >= 40 ? 'bg-green-50 text-green-800' : 'bg-gray-50 text-gray-600'}`}>
-                    {progress >= 40 ? <CheckCircle2 className="h-5 w-5" /> : <Clock className="h-5 w-5" />}
-                    <span>Excel Parsing</span>
-                  </div>
-                  <div className={`flex items-center gap-3 p-3 rounded-lg ${progress >= 60 ? 'bg-green-50 text-green-800' : 'bg-gray-50 text-gray-600'}`}>
-                    {progress >= 60 ? <CheckCircle2 className="h-5 w-5" /> : <Clock className="h-5 w-5" />}
-                    <span>SKU Matching</span>
-                  </div>
-                  <div className={`flex items-center gap-3 p-3 rounded-lg ${progress >= 80 ? 'bg-green-50 text-green-800' : 'bg-gray-50 text-gray-600'}`}>
-                    {progress >= 80 ? <CheckCircle2 className="h-5 w-5" /> : <Clock className="h-5 w-5" />}
-                    <span>Adding Essential Services</span>
-                  </div>
-                  <div className={`flex items-center gap-3 p-3 rounded-lg ${progress >= 100 ? 'bg-green-50 text-green-800' : 'bg-gray-50 text-gray-600'}`}>
-                    {progress >= 100 ? <CheckCircle2 className="h-5 w-5" /> : <Clock className="h-5 w-5" />}
-                    <span>Analysis Complete</span>
-                  </div>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+        </CardContent>
+      </Card>
     </div>
-  )
-}
+  );
+};
 
-export default ExcelUpload
+export default ExcelUpload;
 

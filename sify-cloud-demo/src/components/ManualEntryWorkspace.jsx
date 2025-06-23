@@ -20,6 +20,7 @@ import DeploymentArchitecture from './DeploymentArchitecture';
 import ServiceConfigModal from './ServiceConfigModal';
 import { v4 as uuidv4 } from 'uuid';
 import { DEFAULT_SKU } from './BoQTable';
+import { getPrice, generateInternalCode } from '@/utils/boqUtils';
 
 export default function ManualEntryWorkspace({ onBoQFinalized, projectDetails }) {
   const location = useLocation();
@@ -159,86 +160,29 @@ export default function ManualEntryWorkspace({ onBoQFinalized, projectDetails })
   
   const handleSubmit = () => {
     const boqItems = [];
-    
-    // Process each environment's services
+
     selectedEnvironments.forEach(envKey => {
-      const services = selectedServices[envKey] || [];
-      services.forEach(instance => {
+      const servicesInEnv = selectedServices[envKey] || [];
+      servicesInEnv.forEach(instance => {
         const serviceDetails = findServiceDetails(instance.sku);
         if (!serviceDetails) return;
+
+        const unitPrice = getPrice(serviceDetails, instance.config);
+        const internalCode = generateInternalCode(serviceDetails, instance.config);
         
-        // Base item
-        let category = serviceDetails.category?.title || 'Other';
-        let sku = instance.sku;
-        // Standardize category and SKU
-        if (category && DEFAULT_SKU[category.toUpperCase()]) {
-          category = category.toUpperCase();
-          sku = DEFAULT_SKU[category];
-        } else if (category === 'Other' || !DEFAULT_SKU[category?.toUpperCase()]) {
-          category = 'CUSTOM';
-          sku = 'CI-CUSTOM';
-        }
         const item = {
           id: instance.id,
-          sku,
-          category,
+          sku: serviceDetails.sku,
+          category: serviceDetails.category?.title.toUpperCase() || 'CUSTOM',
           quantity: instance.config.instance_count || 1,
           description: serviceDetails.label,
-          internalCode: '',
-          unitPrice: 0,
-          totalPrice: 0,
+          config: instance.config,
+          internalCode: internalCode,
+          unitPrice: unitPrice,
+          totalPrice: unitPrice * (instance.config.instance_count || 1),
           env: envKey,
-          environmentColor: ENVIRONMENT_TYPES[envKey].color
+          environmentColor: ENVIRONMENT_TYPES[envKey].color,
         };
-
-        // Handle VM configurations
-        if (instance.sku === 'VM-BASIC') {
-          item.category = 'Compute';
-          item.vmConfig = {
-            vcpu: instance.config.cpu || 2,
-            ram: instance.config.ram || 4,
-            storage: instance.config.storage || 50,
-            os: instance.config.os || 'windows-2022',
-            features: []
-          };
-          if (instance.config.backup_retention) item.vmConfig.features.push('backup');
-          if (instance.config.monitoring === 'advanced') item.vmConfig.features.push('antivirus');
-          
-          // Calculate base price
-          item.unitPrice = (
-            (item.vmConfig.vcpu * 400) + // CPU cost
-            (item.vmConfig.ram * 200) + // RAM cost
-            (item.vmConfig.storage * 8) // Storage cost
-          );
-          
-          // Add OS cost
-          if (item.vmConfig.os === 'windows-2022') item.unitPrice += 800;
-          if (item.vmConfig.os === 'rhel') item.unitPrice += 1200;
-          
-          // Add feature costs
-          item.vmConfig.features.forEach(feature => {
-            if (feature === 'backup') item.unitPrice += 300;
-            if (feature === 'antivirus') item.unitPrice += 200;
-          });
-        }
-        
-        // Handle network configurations
-        if (instance.config.public_ip || instance.config.firewall_enabled) {
-          item.networkConfig = {
-            public_ip: instance.config.public_ip || false,
-            firewall_enabled: instance.config.firewall_enabled || false,
-            inbound_ports: instance.config.inbound_ports || [],
-            outbound_access: instance.config.outbound_access || 'restricted'
-          };
-          
-          // Add network costs
-          if (item.networkConfig.public_ip) item.unitPrice += 1000;
-          if (item.networkConfig.firewall_enabled) item.unitPrice += 2000;
-        }
-        
-        // Apply environment scaling factor
-        item.unitPrice *= ENVIRONMENT_TYPES[envKey].scalingFactor || 1;
-        item.totalPrice = item.unitPrice * item.quantity;
         
         boqItems.push(item);
       });
@@ -259,6 +203,11 @@ export default function ManualEntryWorkspace({ onBoQFinalized, projectDetails })
       services = [...services, ...category.services];
     });
     return services;
+  }, []);
+  
+  const serviceCatalog = useMemo(() => {
+    const categories = Object.keys(SERVICE_CATEGORIES);
+    // ... existing code ...
   }, []);
   
   if (!projectDetails) {

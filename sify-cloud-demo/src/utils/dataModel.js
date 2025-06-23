@@ -27,45 +27,11 @@ export const CONTRACT_TERMS = {
   THREE_YEAR: 'three_year'
 }
 
-// Enhanced price-book with internal SKU codes
-export const PRICE_BOOK_SKUS = [
-  // Compute
-  { sku: 'CI-2C4R50S-WINDOWS', internalCode: 'VM001', name: 'Windows VM 2vCPU 4GB', category: 'Compute', basePrice: 2400, unit: 'per month' },
-  { sku: 'CI-4C8R50S-WINDOWS', internalCode: 'VM002', name: 'Windows VM 4vCPU 8GB', category: 'Compute', basePrice: 4800, unit: 'per month' },
-  { sku: 'CI-8C16R50S-WINDOWS', internalCode: 'VM003', name: 'Windows VM 8vCPU 16GB', category: 'Compute', basePrice: 9600, unit: 'per month' },
-  { sku: 'CI-2C4R50S-LINUX', internalCode: 'VM004', name: 'Linux VM 2vCPU 4GB', category: 'Compute', basePrice: 2000, unit: 'per month' },
-  { sku: 'CI-4C8R50S-LINUX', internalCode: 'VM005', name: 'Linux VM 4vCPU 8GB', category: 'Compute', basePrice: 4000, unit: 'per month' },
-  { sku: 'CI-8C16R50S-LINUX', internalCode: 'VM006', name: 'Linux VM 8vCPU 16GB', category: 'Compute', basePrice: 8000, unit: 'per month' },
-  
-  // Storage
-  { sku: 'CI-ST-100G-SSD', internalCode: 'ST001', name: 'SSD Storage 100GB', category: 'Storage', basePrice: 800, unit: 'per month' },
-  { sku: 'CI-ST-500G-SSD', internalCode: 'ST002', name: 'SSD Storage 500GB', category: 'Storage', basePrice: 3500, unit: 'per month' },
-  { sku: 'CI-ST-1000G-HDD', internalCode: 'ST003', name: 'HDD Storage 1TB', category: 'Storage', basePrice: 2000, unit: 'per month' },
-  
-  // Network
-  { sku: 'CI-NW-STD', internalCode: 'NW001', name: 'Standard Load Balancer', category: 'Network', basePrice: 2000, unit: 'per month' },
-  { sku: 'CI-NW-ADV', internalCode: 'NW002', name: 'Advanced Load Balancer', category: 'Network', basePrice: 4000, unit: 'per month' },
-  { sku: 'CI-VPN-S2S', internalCode: 'NW003', name: 'Site-to-Site VPN', category: 'Network', basePrice: 1500, unit: 'per month' },
-  { sku: 'CI-INET-100M', internalCode: 'NW004', name: 'Internet 100Mbps', category: 'Network', basePrice: 5000, unit: 'per month' },
-  { sku: 'CI-INET-1G', internalCode: 'NW005', name: 'Internet 1Gbps', category: 'Network', basePrice: 15000, unit: 'per month' },
-  
-  // Security
-  { sku: 'CI-SEC-FW-STD', internalCode: 'SEC001', name: 'Standard Firewall', category: 'Security', basePrice: 2500, unit: 'per month' },
-  { sku: 'CI-SEC-FW-ENT', internalCode: 'SEC002', name: 'Enterprise Firewall', category: 'Security', basePrice: 5000, unit: 'per month' },
-  { sku: 'CI-SEC-AV-STD', internalCode: 'SEC003', name: 'Standard Antivirus', category: 'Security', basePrice: 300, unit: 'per instance' },
-  { sku: 'CI-SEC-AV-ENT', internalCode: 'SEC004', name: 'Enterprise Antivirus', category: 'Security', basePrice: 500, unit: 'per instance' },
-  
-  // Backup & DR
-  { sku: 'CI-BKP-STD', internalCode: 'BKP001', name: 'Standard Backup', category: 'Backup', basePrice: 1000, unit: 'per 100GB' },
-  { sku: 'CI-BKP-ENT', internalCode: 'BKP002', name: 'Enterprise Backup', category: 'Backup', basePrice: 2000, unit: 'per 100GB' },
-  { sku: 'CI-DR-BASIC', internalCode: 'DR001', name: 'Basic Disaster Recovery', category: 'DR', basePrice: 5000, unit: 'per month' }
-]
-
-// Auto-add essential services
+// Auto-add essential services using the modern service catalog SKUs
 export const ESSENTIAL_SERVICES = [
-  { sku: 'CI-BKP-STD', quantity: 1, autoAdded: true, reason: 'Data protection compliance' },
-  { sku: 'CI-VPN-S2S', quantity: 1, autoAdded: true, reason: 'Secure connectivity' },
-  { sku: 'CI-INET-100M', quantity: 1, autoAdded: true, reason: 'Internet connectivity' }
+  { sku: 'BACKUP-BASIC', quantity: 1, autoAdded: true, reason: 'Data protection compliance' },
+  { sku: 'VPN-S2S', quantity: 1, autoAdded: true, reason: 'Secure connectivity' },
+  { sku: 'INTERNET-BASIC', quantity: 1, autoAdded: true, reason: 'Internet connectivity' }
 ]
 
 // Project data model with contract terms

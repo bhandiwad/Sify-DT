@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from "react";
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import ErrorBoundary from './components/ErrorBoundary'
 import Dashboard from './components/Dashboard'
 import NewProject from './components/NewProject'
@@ -19,43 +19,56 @@ import PortalLayout from './pages/portal/PortalLayout'
 import './App.css'
 import { Toaster } from "@/components/ui/sonner"
 import PersonaSwitcher from './components/PersonaSwitcher'
-import { PERSONAS } from './utils/dataModel'
+import { PERSONAS, PROJECT_STATUS } from './utils/dataModel'
 import DemoControls from './components/DemoControls'
 import { v4 as uuidv4 } from 'uuid'
 import { SERVICE_CATEGORIES as SERVICE_CATALOG } from './utils/serviceModel'
 
 // This component will represent the main view after a customer is provisioned
-const ProvisionedCustomerView = ({ customer, onViewInventory }) => (
-  <div className="flex items-center justify-center h-full">
-    <div className="text-center">
-      <h2 className="text-2xl font-bold mb-4">Customer Provisioned</h2>
-      <p className="mb-2"><strong>Customer:</strong> {customer.name}</p>
-      <p className="mb-6"><strong>Subscription ID:</strong> {customer.subscriptions[0].id}</p>
-      <button 
-        onClick={onViewInventory}
-        className="bg-blue-600 text-white font-bold py-2 px-4 rounded hover:bg-blue-700 transition-colors"
-      >
-        View Inventory Portal
-      </button>
+const ProvisionedCustomerView = ({ customer }) => {
+  const navigate = useNavigate();
+  return (
+    <div className="flex items-center justify-center h-full">
+      <div className="text-center">
+        <h2 className="text-2xl font-bold mb-4">Customer Provisioned</h2>
+        <p className="mb-2"><strong>Customer:</strong> {customer.name}</p>
+        <p className="mb-6"><strong>Subscription ID:</strong> {customer.subscriptions[0].id}</p>
+        <button 
+          onClick={() => navigate('/portal')}
+          className="bg-blue-600 text-white font-bold py-2 px-4 rounded hover:bg-blue-700 transition-colors"
+        >
+          View Inventory Portal
+        </button>
+      </div>
     </div>
-  </div>
-)
+  );
+};
 
 function App() {
   const [currentPersona, setCurrentPersona] = useState(PERSONAS.SOLUTION_ARCHITECT);
-  const [currentStep, setCurrentStep] = useState(0);
+  const [currentView, setCurrentView] = useState('dashboard');
   const [boqItems, setBoqItems] = useState([]);
   const [projectDetails, setProjectDetails] = useState(null);
   const [customerInventory, setCustomerInventory] = useState(null);
 
   const handleProjectCreate = (details) => {
     setProjectDetails(details);
-    setCurrentStep(0.5); // A temporary step to show the upload/manual pages
+    setCurrentView('entry-method');
   };
 
   const handleBoQFinalized = (items) => {
+    setProjectDetails(prev => ({ ...prev, boqItems: items, status: PROJECT_STATUS.PENDING_PM_REVIEW }));
     setBoqItems(items);
-    setCurrentStep(1); // Move to BoQ Generated view
+    setCurrentView('boq');
+  };
+
+  const handleApproval = (approvalData) => {
+    setProjectDetails(prev => ({
+        ...prev,
+        status: approvalData.status,
+        comments: [...(prev.comments || []), approvalData.comments]
+    }));
+    setCurrentView('boq');
   };
 
   const transformBoqToInventory = (boq) => {
@@ -135,7 +148,7 @@ function App() {
   const resetAll = () => {
     setBoqItems([]);
     setProjectDetails(null);
-    setCurrentStep(0);
+    setCurrentView('dashboard');
     setCustomerInventory(null);
   };
 
@@ -155,27 +168,50 @@ function App() {
                 <button onClick={resetAll} className="text-sm text-gray-500 hover:text-gray-800">Reset Demo</button>
               </div>
             </header>
-            <main className="flex-1 overflow-y-auto bg-gray-100 dark:bg-gray-900">
+            <main className="flex-1 overflow-y-auto p-8">
               <Routes>
-                <Route path="/" element={<Navigate to="/dashboard" replace />} />
-                <Route path="/dashboard" element={<Dashboard currentPersona={currentPersona} />} />
-                <Route path="/new-project" element={<NewProject />} />
-                <Route path="/excel-upload" element={<ExcelUpload onBoQFinalized={handleBoQFinalized} projectDetails={projectDetails} />} />
-                <Route path="/project-details/:projectId" element={<ProjectDetails />} />
-                <Route path="/product-manager-review" element={<ProductManagerReview />} />
-                <Route path="/solution-architect-vetting" element={<SolutionArchitectVetting />} />
-                <Route path="/boq-generated" element={<BoQGenerated />} />
-                <Route path="/proposal-generated" element={<ProposalGenerated />} />
-                <Route path="/manual-entry" element={<ManualEntryWorkspace onBoQFinalized={handleBoQFinalized} projectDetails={projectDetails} />} />
-                <Route path="/deployment" element={<DeploymentFlow />} />
+                <Route
+                  path="/"
+                  element={
+                    customerInventory ? (
+                      <ProvisionedCustomerView customer={customerInventory} />
+                    ) : currentView === 'boq' ? (
+                      <BoQGenerated
+                        items={boqItems}
+                        onProvision={handleProvision}
+                        projectDetails={projectDetails}
+                        onStartReview={() => setCurrentView('pm-review')}
+                      />
+                    ) : currentView === 'pm-review' ? (
+                      <ProductManagerReview
+                        projectDetails={projectDetails}
+                        onApproval={handleApproval}
+                      />
+                    ) : currentView === 'dashboard' ? (
+                      <Dashboard onNewProject={() => setCurrentView('new-project')} />
+                    ) : (
+                      <NewProject onProjectCreate={handleProjectCreate} />
+                    )
+                  }
+                />
+                
+                <Route path="/upload" element={<ExcelUpload onBoQFinalized={handleBoQFinalized} projectDetails={projectDetails} />} />
+                <Route path="/manual" element={<ManualEntryWorkspace onBoQFinalized={handleBoQFinalized} projectDetails={projectDetails} />} />
+                
                 <Route path="/portal" element={<PortalLayout inventory={customerInventory} />}>
                   <Route index element={<InventoryDashboard />} />
                   <Route path="topology" element={<ResourceTopology />} />
                   <Route path="costs" element={<CostManagement />} />
-                  <Route path="request-service" element={<ServiceRequest />} />
+                  <Route path="service-request" element={<ServiceRequest />} />
                 </Route>
-                {/* Catch all route */}
-                <Route path="*" element={<Navigate to="/dashboard" replace />} />
+
+                {/* Legacy routes for direct access during dev, can be removed */}
+                <Route path="/boq-generated" element={<BoQGenerated items={boqItems} projectDetails={projectDetails} onProvision={handleProvision} />} />
+                <Route path="/proposal" element={<ProposalGenerated items={boqItems} projectDetails={projectDetails} />} />
+                <Route path="/details" element={<ProjectDetails project={projectDetails} onBack={() => setCurrentView('dashboard')} />} />
+
+                {/* Catch-all to redirect to the main view */}
+                <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </main>
           </div>

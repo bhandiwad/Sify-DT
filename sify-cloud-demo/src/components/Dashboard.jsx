@@ -36,7 +36,7 @@ import {
   FLOW_TYPES
 } from '@/utils/dataModel'
 
-const Dashboard = () => {
+const Dashboard = ({ onNewProject }) => {
   const [projects, setProjects] = useState([])
   const [currentPersona, setCurrentPersona] = useState(getCurrentPersona())
   const [selectedDemoType, setSelectedDemoType] = useState(FLOW_TYPES.STANDARD)
@@ -69,7 +69,8 @@ const Dashboard = () => {
   const handleNewProject = () => {
     // Store selected demo type for the new project
     localStorage.setItem('selectedDemoType', selectedDemoType)
-    navigate('/new-project')
+    // Call the handler from App.jsx to change the view
+    onNewProject();
   }
 
   const handleProjectAction = (project) => {

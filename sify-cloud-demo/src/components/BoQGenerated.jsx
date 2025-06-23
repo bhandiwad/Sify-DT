@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { PRICE_BOOK_SKUS, getCurrentPersona, PERSONAS } from '@/utils/dataModel'
+import { getCurrentPersona, PERSONAS } from '@/utils/dataModel'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { getProject } from '@/utils/dataModel'
 import BoQTable from './BoQTable'
@@ -95,7 +95,7 @@ function getFloorPrice(item) {
   return item.unitPrice || 0;
 }
 
-const BoQGenerated = ({ items, projectDetails, onProvision }) => {
+const BoQGenerated = ({ items, projectDetails, onProvision, onStartReview }) => {
   const navigate = useNavigate()
   
   const [projectData, setProjectData] = useState(projectDetails)
@@ -214,6 +214,11 @@ const BoQGenerated = ({ items, projectDetails, onProvision }) => {
               <Button variant="outline" onClick={() => navigate(-1)}><ArrowLeft className="mr-2 h-4 w-4" /> Back</Button>
               <Button variant="outline"><Download className="mr-2 h-4 w-4" /> Download PDF</Button>
               <Button onClick={() => navigate('/proposal', { state: { ...projectData, boqItems: boqItems } })}>Generate Proposal <ArrowRight className="ml-2 h-4 w-4" /></Button>
+              {projectDetails?.status === 'PENDING_PM_REVIEW' && onStartReview && (
+                <Button onClick={onStartReview} variant="secondary">
+                  Start PM Review
+                </Button>
+              )}
               <Button onClick={onProvision} variant="success" className="bg-green-600 hover:bg-green-700 text-white">
                 <CheckCircle className="mr-2 h-4 w-4" /> Provision Customer
               </Button>
